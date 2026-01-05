@@ -1,0 +1,7 @@
+{
+  "name": "RecorreAI - Recurso de Multas Inteligente",
+  "description": "Uma plataforma inteligente que utiliza IA para analisar multas de trânsito e gerar recursos formais personalizados para o DETRAN/JARI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
