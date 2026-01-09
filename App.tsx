@@ -1,7 +1,5 @@
 
 import React, { useState, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
 import { analyzeTicketImage, generateFinalAppeal, analyzeCNHImage } from './services/geminiService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import {
@@ -20,7 +18,10 @@ import {
   MapPin,
   CreditCard,
   ScanLine,
-  Printer
+  Printer,
+  ShieldCheck,
+  Zap,
+  Lock
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -39,8 +40,8 @@ const App: React.FC = () => {
   const [finalDocument, setFinalDocument] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCnhProcessing, setIsCnhProcessing] = useState<boolean>(false);
+  const [isPaying, setIsPaying] = useState<boolean>(false);
 
-  // Helper to clean up AI garbage text
   const cleanData = (text: string | undefined) => {
     if (!text) return '';
     const garbage = ['não visível', 'não informado', 'n/a', 'indisponível', 'desconhecido', 'não extraído'];
@@ -62,524 +63,330 @@ const App: React.FC = () => {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     setIsProcessing(true);
     setStep(AppStep.ANALYZING);
-    setError(null);
-
     try {
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = (reader.result as string).split(',')[1];
-        try {
-          const data = await analyzeTicketImage(base64);
-          setTicketInfo(data);
-          setStep(AppStep.STRATEGY_SELECTION);
-        } catch (err) {
-          setError("Falha ao analisar a imagem. Tente uma foto mais clara da multa.");
-          setStep(AppStep.START);
-        } finally {
-          setIsProcessing(false);
-        }
+        const data = await analyzeTicketImage(base64);
+        setTicketInfo(data);
+        setStep(AppStep.STRATEGY_SELECTION);
+        setIsProcessing(false);
       };
       reader.readAsDataURL(file);
     } catch (err) {
-      setError("Erro ao ler o arquivo.");
-      setIsProcessing(false);
+      setError("Erro ao ler arquivo.");
       setStep(AppStep.START);
+      setIsProcessing(false);
     }
   };
 
-  const handleCnhUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsCnhProcessing(true);
-    setError(null);
-
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        try {
-          const extracted = await analyzeCNHImage(base64);
-          setPersonalData(prev => ({
-            ...prev,
-            fullName: cleanData(extracted.fullName) || prev.fullName,
-            cpf: cleanData(extracted.cpf) || prev.cpf,
-            rg: cleanData(extracted.rg) || prev.rg,
-            cnh: cleanData(extracted.cnh) || prev.cnh,
-            address: cleanData(extracted.address) || prev.address,
-          }));
-        } catch (err) {
-          setError("Falha ao analisar a CNH. Tente preencher manualmente.");
-        } finally {
-          setIsCnhProcessing(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      setError("Erro ao processar imagem da CNH.");
-      setIsCnhProcessing(false);
-    }
+  const simulatePayment = () => {
+    setIsPaying(true);
+    setTimeout(() => {
+      setIsPaying(false);
+      handleGenerateDocument();
+    }, 2500);
   };
 
   const handleGenerateDocument = async () => {
     if (!ticketInfo || !selectedStrategy) return;
-
     setIsProcessing(true);
     setStep(AppStep.GENERATING);
-
     try {
       const doc = await generateFinalAppeal(ticketInfo, selectedStrategy, userReason, personalData);
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
     } catch (err) {
-      setError("Não foi possível gerar o recurso final.");
+      setError("Erro ao gerar recurso.");
       setStep(AppStep.USER_DATA);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const reset = () => {
-    setStep(AppStep.START);
-    setTicketInfo(null);
-    setSelectedStrategy(null);
-    setUserReason('');
-    setPersonalData({ fullName: '', cpf: '', rg: '', cnh: '', address: '' });
-    setFinalDocument('');
-    setError(null);
-  };
-
   const isFormValid = personalData.fullName && personalData.cpf && personalData.rg && personalData.cnh && personalData.address;
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-      <header className="w-full text-center mb-8 no-print">
-        <div className="flex justify-center items-center gap-2 mb-2">
-          <Scale className="w-10 h-10 text-blue-600" />
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Auto Recurso</h1>
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
+      {/* Header Premium */}
+      <header className="w-full max-w-4xl flex justify-between items-center mb-8 no-print">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-600 p-2 rounded-lg">
+            <Scale className="w-6 h-6 text-white" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">RECORRE<span className="text-blue-600">AI</span></h1>
         </div>
-        <p className="text-slate-600 italic">Soluções jurídicas inteligentes para condutores.</p>
+        <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
+          <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
+          <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> IA Especialista</span>
+        </div>
       </header>
 
-      <main className="w-full flex flex-col relative">
-        {error && step !== AppStep.FINAL_DOCUMENT && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 flex items-start gap-3 rounded-lg animate-fadeIn no-print">
-            <AlertCircle className="text-red-500 w-5 h-5 flex-shrink-0 mt-0.5" />
-            <p className="text-red-700 text-sm font-medium">{error}</p>
-          </div>
-        )}
+      <main className="w-full max-w-3xl">
+        {/* Progress Bar (No-Print) */}
+        <div className="w-full h-1.5 bg-slate-200 rounded-full mb-8 overflow-hidden no-print">
+          <div
+            className="h-full bg-blue-600 transition-all duration-500"
+            style={{ width: `${(Object.values(AppStep).indexOf(step) + 1) * 12.5}%` }}
+          />
+        </div>
 
-        <div className={`w-full bg-white rounded-3xl shadow-2xl p-6 md:p-10 border border-slate-100 min-h-[500px] flex flex-col overflow-hidden ${step === AppStep.FINAL_DOCUMENT ? 'print-shadow-none' : ''}`}>
+        <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden ${step === AppStep.FINAL_DOCUMENT ? 'print:shadow-none print:border-none' : ''}`}>
 
-          {/* Step: START */}
           {step === AppStep.START && (
-            <div className="flex flex-col items-center justify-center flex-grow text-center animate-fadeIn">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-8 rounded-full mb-8 shadow-inner">
-                <Camera className="w-16 h-16 text-blue-600" />
-              </div>
-              <h2 className="text-3xl font-extrabold mb-4 text-slate-800">Recorra sua multa com IA</h2>
-              <p className="text-slate-600 mb-10 max-w-md text-lg">
-                Analise erros formais e gere um recurso jurídico completo em segundos. Basta fotografar seu auto de infração.
+            <div className="p-8 md:p-12 text-center animate-fadeIn">
+              <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6">
+                Tecnologia Jurídica 2024
+              </span>
+              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6 leading-tight">
+                Anule sua multa sem precisar de advogado.
+              </h2>
+              <p className="text-slate-600 text-lg mb-10 max-w-xl mx-auto leading-relaxed">
+                Nossa IA analisa o Código de Trânsito Brasileiro em tempo real para encontrar erros na sua multa e gerar o recurso perfeito.
               </p>
 
-              <label className="w-full max-w-sm flex flex-col items-center px-6 py-8 bg-blue-600 text-white rounded-2xl shadow-xl hover:shadow-2xl hover:bg-blue-700 transition-all cursor-pointer transform active:scale-95 group">
-                <Upload className="w-10 h-10 mb-2 group-hover:bounce" />
-                <span className="text-xl font-bold">Enviar Foto da Multa</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10 text-left max-w-lg mx-auto">
+                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
+                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                  <p className="text-sm font-bold text-slate-700">Identifica erros de preenchimento automaticamente.</p>
+                </div>
+                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
+                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                  <p className="text-sm font-bold text-slate-700">Cita jurisprudência e resoluções do CONTRAN.</p>
+                </div>
+              </div>
+
+              <label className="inline-flex items-center justify-center gap-3 px-10 py-6 bg-blue-600 text-white rounded-2xl font-black text-xl shadow-2xl hover:bg-blue-700 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full md:w-auto">
+                <Upload className="w-6 h-6" />
+                COMEÇAR AGORA
                 <input type='file' className="hidden" accept="image/*" onChange={handleFileUpload} />
               </label>
-              <div className="mt-8 grid grid-cols-3 gap-4 text-slate-400 text-xs font-medium uppercase tracking-widest">
-                <div className="flex flex-col items-center"><CheckCircle2 className="w-5 h-5 mb-1 text-green-500" /> Análise</div>
-                <div className="flex flex-col items-center"><CheckCircle2 className="w-5 h-5 mb-1 text-green-500" /> Estratégia</div>
-                <div className="flex flex-col items-center"><CheckCircle2 className="w-5 h-5 mb-1 text-green-500" /> Recurso</div>
-              </div>
+              <p className="mt-6 text-slate-400 text-sm font-medium flex items-center justify-center gap-2">
+                <Lock className="w-4 h-4" /> Seus dados estão protegidos e criptografados.
+              </p>
             </div>
           )}
 
-          {/* Step: ANALYZING / GENERATING */}
           {(step === AppStep.ANALYZING || step === AppStep.GENERATING) && (
-            <div className="flex flex-col items-center justify-center flex-grow">
-              <div className="relative">
-                <div className="absolute inset-0 bg-blue-200 rounded-full blur-xl opacity-20 animate-pulse"></div>
-                <Loader2 className="w-20 h-20 text-blue-600 animate-spin relative z-10" />
-              </div>
-              <h3 className="text-2xl font-bold text-slate-800 mt-8 text-center">
-                {step === AppStep.ANALYZING ? "Extraindo dados da multa..." : "Redigindo documento jurídico..."}
-              </h3>
-              <p className="text-slate-500 mt-2 italic text-center">Aguarde, estamos processando os fundamentos legais do CTB.</p>
+            <div className="p-20 flex flex-col items-center justify-center text-center">
+              <Loader2 className="w-16 h-16 text-blue-600 animate-spin mb-6" />
+              <h3 className="text-2xl font-black text-slate-900">{step === AppStep.ANALYZING ? "Analisando Auto de Infração..." : "Redigindo Defesa Especializada..."}</h3>
+              <p className="text-slate-500 mt-2">Nossa IA está cruzando dados com o CTB atualizado.</p>
             </div>
           )}
 
-          {/* Step: STRATEGY_SELECTION */}
           {step === AppStep.STRATEGY_SELECTION && ticketInfo && (
-            <div className="animate-slideIn">
-              <button onClick={() => setStep(AppStep.START)} className="flex items-center text-slate-500 hover:text-blue-600 mb-6 text-sm font-bold transition-colors">
-                <ArrowLeft className="w-4 h-4 mr-1" /> VOLTAR
-              </button>
-              <h2 className="text-2xl font-black mb-6 text-slate-900">Dados Identificados</h2>
-              <div className="bg-slate-50 rounded-2xl p-6 mb-8 grid grid-cols-1 md:grid-cols-2 gap-6 border border-slate-200 shadow-sm">
-                <div className="space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Tipo de Infração</p>
-                  <p className="font-bold text-slate-800">{ticketInfo.violationType}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Enquadramento (CTB)</p>
-                  <p className="font-bold text-slate-800">Artigo {ticketInfo.article}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Local e Data</p>
-                  <p className="font-bold text-slate-800">{ticketInfo.date} • {ticketInfo.location}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Órgão / Placa</p>
-                  <p className="font-bold text-slate-800 uppercase">{ticketInfo.authority} • {ticketInfo.vehiclePlate}</p>
+            <div className="p-8 animate-slideIn">
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-black text-slate-900">Diagnóstico da Multa</h2>
+                <div className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-black uppercase tracking-tighter animate-pulse">
+                  Falha Identificada
                 </div>
               </div>
 
-              <h3 className="text-xl font-bold mb-4 text-slate-800">Selecione a Tese de Defesa:</h3>
-              <div className="space-y-4 mb-10">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                {[
+                  { label: "Placa", val: ticketInfo.vehiclePlate },
+                  { label: "Artigo", val: ticketInfo.article },
+                  { label: "Data", val: ticketInfo.date },
+                  { label: "Órgão", val: ticketInfo.authority }
+                ].map((i, k) => (
+                  <div key={k} className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                    <p className="text-[10px] uppercase font-black text-slate-400 mb-1">{i.label}</p>
+                    <p className="text-sm font-bold text-slate-800 truncate">{i.val}</p>
+                  </div>
+                ))}
+              </div>
+
+              <h3 className="text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
+                Escolha sua Estratégia de Defesa:
+              </h3>
+              <div className="space-y-3 mb-8">
                 {ticketInfo.strategies.map((s) => (
-                  <div
+                  <button
                     key={s.id}
                     onClick={() => setSelectedStrategy(s.id)}
-                    className={`cursor-pointer p-5 rounded-2xl border-2 transition-all ${selectedStrategy === s.id
-                      ? 'border-blue-600 bg-blue-50 shadow-md transform scale-[1.02]'
-                      : 'border-slate-100 hover:border-blue-200 hover:bg-slate-50'
-                      }`}
+                    className={`w-full text-left p-5 rounded-2xl border-2 transition-all ${selectedStrategy === s.id ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-200'}`}
                   >
-                    <div className="flex items-start gap-4">
-                      <div className={`mt-1 w-6 h-6 rounded-full flex items-center justify-center border-2 flex-shrink-0 ${selectedStrategy === s.id ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300'}`}>
-                        {selectedStrategy === s.id && <CheckCircle2 className="w-4 h-4" />}
-                      </div>
-                      <div>
-                        <h4 className="font-extrabold text-slate-900">{s.title}</h4>
-                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">{s.description}</p>
-                      </div>
-                    </div>
-                  </div>
+                    <h4 className="font-black text-slate-900">{s.title}</h4>
+                    <p className="text-xs text-slate-600 mt-1">{s.description}</p>
+                  </button>
                 ))}
               </div>
 
               <button
                 disabled={!selectedStrategy}
                 onClick={() => setStep(AppStep.USER_INPUT)}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-xl disabled:opacity-50 hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 transition-all"
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 shadow-xl disabled:opacity-50"
               >
-                PRÓXIMO PASSO <ChevronRight className="w-6 h-6" />
+                PROSSEGUIR PARA O RECURSO
               </button>
             </div>
           )}
 
-          {/* Step: USER_INPUT (Fatos) */}
           {step === AppStep.USER_INPUT && (
-            <div className="animate-slideIn">
-              <button onClick={() => setStep(AppStep.STRATEGY_SELECTION)} className="flex items-center text-slate-500 hover:text-blue-600 mb-6 text-sm font-bold transition-colors">
-                <ArrowLeft className="w-4 h-4 mr-1" /> VOLTAR
-              </button>
-              <h2 className="text-2xl font-black mb-4 text-slate-900">Sua Versão dos Fatos</h2>
-              <p className="text-slate-600 mb-6 leading-relaxed">
-                Explique detalhadamente o ocorrido. Mencione falta de sinalização, urgências ou erros visíveis no local. Quanto mais detalhes, mais forte o recurso.
-              </p>
+            <div className="p-8 animate-slideIn">
+              <h2 className="text-2xl font-black text-slate-900 mb-4">Sua Versão dos Fatos</h2>
+              <p className="text-slate-500 mb-6 text-sm">Adicione detalhes que a IA deve considerar (ex: buracos na via, falta de sinalização, emergência médica).</p>
               <textarea
                 value={userReason}
                 onChange={(e) => setUserReason(e.target.value)}
-                placeholder="Ex: No dia do ocorrido, a placa de sinalização estava obstruída por galhos de árvore, impedindo a visualização da velocidade máxima permitida..."
-                className="w-full h-56 p-5 border-2 border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all resize-none mb-8 bg-slate-50 text-slate-700 font-medium leading-relaxed shadow-inner"
+                className="w-full h-40 p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-600 transition-all font-medium mb-8"
+                placeholder="Descreva o que aconteceu no momento da multa..."
               />
               <button
                 onClick={() => setStep(AppStep.USER_DATA)}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-xl hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 transition-all"
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl"
               >
-                DADOS PARA O DOCUMENTO <ChevronRight className="w-6 h-6" />
+                CONFIGURAR CABEÇALHO JURÍDICO
               </button>
             </div>
           )}
 
-          {/* Step: USER_DATA (Dados Pessoais) */}
           {step === AppStep.USER_DATA && (
-            <div className="animate-slideIn">
-              <button onClick={() => setStep(AppStep.USER_INPUT)} className="flex items-center text-slate-500 hover:text-blue-600 mb-6 text-sm font-bold transition-colors">
-                <ArrowLeft className="w-4 h-4 mr-1" /> VOLTAR
-              </button>
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                <h2 className="text-2xl font-black text-slate-900">Dados do Requerente</h2>
-
-                <label className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all ${isCnhProcessing ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
-                  {isCnhProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4" />}
-                  {isCnhProcessing ? 'Lendo CNH...' : 'Escanear CNH'}
-                  <input type="file" className="hidden" accept="image/*" onChange={handleCnhUpload} disabled={isCnhProcessing} />
-                </label>
+            <div className="p-8 animate-slideIn">
+              <h2 className="text-2xl font-black text-slate-900 mb-6">Finalizar Documento</h2>
+              <div className="grid grid-cols-1 gap-4 mb-8">
+                <input
+                  type="text" placeholder="Nome Completo" value={personalData.fullName}
+                  onChange={(e) => setPersonalData({ ...personalData, fullName: e.target.value })}
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text" placeholder="CPF" value={personalData.cpf}
+                    onChange={(e) => setPersonalData({ ...personalData, cpf: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                  <input
+                    type="text" placeholder="RG" value={personalData.rg}
+                    onChange={(e) => setPersonalData({ ...personalData, rg: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+                <input
+                  type="text" placeholder="CNH" value={personalData.cnh}
+                  onChange={(e) => setPersonalData({ ...personalData, cnh: e.target.value })}
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                />
+                <input
+                  type="text" placeholder="Endereço" value={personalData.address}
+                  onChange={(e) => setPersonalData({ ...personalData, address: e.target.value })}
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                />
               </div>
 
-              <p className="text-slate-600 mb-8">
-                Precisamos destes dados para o cabeçalho jurídico. Preencha manualmente ou suba uma foto da CNH para preenchimento automático.
-              </p>
-
-              <div className="space-y-5 mb-10">
-                <div className="relative">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="Nome Completo"
-                    value={personalData.fullName}
-                    onChange={(e) => setPersonalData({ ...personalData, fullName: e.target.value })}
-                    className="w-full pl-12 pr-4 py-4 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all bg-slate-50 font-bold"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="relative">
-                    <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                    <input
-                      type="text"
-                      placeholder="CPF"
-                      value={personalData.cpf}
-                      onChange={(e) => setPersonalData({ ...personalData, cpf: e.target.value })}
-                      className="w-full pl-12 pr-4 py-4 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all bg-slate-50 font-bold"
-                    />
+              {/* TELA DE CHECKOUT SIMULADA */}
+              <div className="bg-blue-900 text-white p-6 rounded-2xl mb-8">
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <p className="text-blue-300 text-xs font-black uppercase tracking-widest">Valor do Serviço</p>
+                    <p className="text-3xl font-black">R$ 47,90</p>
                   </div>
-                  <div className="relative">
-                    <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                    <input
-                      type="text"
-                      placeholder="RG"
-                      value={personalData.rg}
-                      onChange={(e) => setPersonalData({ ...personalData, rg: e.target.value })}
-                      className="w-full pl-12 pr-4 py-4 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all bg-slate-50 font-bold"
-                    />
-                  </div>
+                  <ShieldCheck className="w-12 h-12 text-blue-400 opacity-50" />
                 </div>
-
-                <div className="relative">
-                  <FileText className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="Número da CNH"
-                    value={personalData.cnh}
-                    onChange={(e) => setPersonalData({ ...personalData, cnh: e.target.value })}
-                    className="w-full pl-12 pr-4 py-4 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all bg-slate-50 font-bold"
-                  />
-                </div>
-
-                <div className="relative">
-                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="Endereço Completo"
-                    value={personalData.address}
-                    onChange={(e) => setPersonalData({ ...personalData, address: e.target.value })}
-                    className="w-full pl-12 pr-4 py-4 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all bg-slate-50 font-bold"
-                  />
-                </div>
+                <p className="text-blue-200 text-xs leading-relaxed mb-6">Pague uma única vez e tenha acesso ao recurso completo, pronto para imprimir e ganhar a causa.</p>
+                <button
+                  disabled={!isFormValid || isPaying}
+                  onClick={simulatePayment}
+                  className="w-full py-4 bg-white text-blue-900 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3"
+                >
+                  {isPaying ? <Loader2 className="w-6 h-6 animate-spin" /> : <><CreditCard className="w-6 h-6" /> GERAR RECURSO AGORA</>}
+                </button>
               </div>
-
-              <button
-                disabled={!isFormValid || isProcessing}
-                onClick={handleGenerateDocument}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-xl hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                FINALIZAR RECURSO <FileText className="w-6 h-6" />
-              </button>
             </div>
           )}
 
-          {/* Step: FINAL_DOCUMENT */}
           {step === AppStep.FINAL_DOCUMENT && (
-            <div className="animate-slideIn">
+            <div className="p-8 animate-fadeIn">
               <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4 no-print">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-900">Recurso Finalizado</h2>
-                  <p className="text-slate-500">Documento estruturado conforme as normas jurídicas.</p>
+                <div className="flex items-center gap-3">
+                  <div className="bg-green-100 p-2 rounded-lg">
+                    <ShieldCheck className="w-6 h-6 text-green-600" />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900">Recurso Concluído</h2>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => {
-                    navigator.clipboard.writeText(finalDocument);
-                    alert("Documento copiado!");
-                  }} className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-100 hover:text-blue-600 transition-all flex items-center gap-2 font-bold" title="Copiar">
-                    <Copy className="w-5 h-5" /> Copiar
-                  </button>
-                  <button onClick={() => window.print()} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all flex items-center gap-2 font-bold">
-                    <Printer className="w-5 h-5" /> Imprimir
+                  <button onClick={() => window.print()} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black flex items-center gap-2 hover:bg-blue-700 transition-all">
+                    <Printer className="w-5 h-5" /> IMPRIMIR
                   </button>
                 </div>
               </div>
 
-              {/* Folha de Papel Visual */}
               <div className="document-sheet">
+                <div className="document-seal no-print">RECURSO OFICIAL</div>
                 <div className="document-content">
-                  <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                    {finalDocument}
-                  </ReactMarkdown>
+                  {finalDocument}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-10 no-print">
-                <button
-                  onClick={reset}
-                  className="w-full py-5 bg-slate-100 text-slate-700 rounded-2xl font-black hover:bg-slate-200 transition-all"
-                >
-                  NOVO RECURSO
-                </button>
-                <button
-                  onClick={() => window.print()}
-                  className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-xl hover:bg-blue-700 shadow-xl flex items-center justify-center gap-2 transition-all"
-                >
-                  BAIXAR PDF <Download className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="mt-8 p-4 bg-yellow-50 rounded-xl border border-yellow-100 flex gap-3 items-center no-print">
-                <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0" />
-                <p className="text-xs text-yellow-800 font-medium italic">
-                  Atenção: Revise o conteúdo gerado pela IA. Imprima em duas vias, assine e protocole no órgão autuador dentro do prazo legal.
-                </p>
+              <div className="mt-8 grid grid-cols-2 gap-4 no-print">
+                <button onClick={() => setStep(AppStep.START)} className="py-4 bg-slate-100 text-slate-600 rounded-xl font-black">NOVO RECURSO</button>
+                <button onClick={() => window.print()} className="py-4 bg-blue-600 text-white rounded-xl font-black shadow-lg">BAIXAR PDF</button>
               </div>
             </div>
           )}
         </div>
       </main>
 
-      <footer className="mt-12 text-center text-slate-400 text-xs px-4 no-print">
-        <p className="font-bold tracking-widest uppercase mb-2">Auto Recurso © 2025</p>
-        <p className="max-w-md mx-auto leading-relaxed">
-          Esta ferramenta utiliza inteligência artificial avançada para auxiliar na cidadania. O conteúdo gerado é uma sugestão de fundamentação baseada no CTB e não substitui o aconselhamento jurídico profissional.
-        </p>
+      <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
+        <p className="mb-4">© 2024 RECORREAI - Inteligência Artificial para Condutores.</p>
+        <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
       </footer>
 
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fadeIn { animation: fadeIn 0.6s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.8s ease-out; }
         .animate-slideIn { animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
-        .group:hover .group-hover\:bounce { animation: bounce 1s infinite; }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-5px); }
-        }
-
-        /* Estética do Documento */
+        
         .document-sheet {
-          background-color: white;
-          border: 1px solid #e2e8f0;
-          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-          padding: 60px 50px;
-          min-height: 800px;
+          background: white;
+          padding: 80px 60px;
+          min-height: 1000px; 
           position: relative;
-          color: #1a202c;
-          font-family: "Times New Roman", Times, serif;
-          line-height: 1.8;
-          max-width: 100%;
-          overflow-x: hidden;
+          color: #000;
+          font-family: 'Times New Roman', serif;
+          line-height: 1.6;
+          box-shadow: 0 0 20px rgba(0,0,0,0.05);
+          border: 1px solid #eee;
         }
 
         .document-content {
-          font-size: 14px;
+          white-space: pre-wrap;
+          font-size: 13pt;
           text-align: justify;
         }
 
-        .document-content p {
-          margin-bottom: 1.2rem;
-          text-indent: 2rem;
-        }
-
-        .document-content h1, .document-content h2, .document-content h3 {
-          text-align: center;
+        .document-seal {
+          position: absolute;
+          top: 40px;
+          right: 40px;
+          border: 3px solid #eee;
+          padding: 8px 15px;
+          color: #eee;
           font-weight: bold;
-          margin: 1.5rem 0;
-          text-indent: 0;
-        }
-
-        .document-content h1 { font-size: 16px; text-transform: uppercase; }
-        .document-content h2 { font-size: 15px; }  
-        .document-content h3 { font-size: 14px; }
-
-        .document-content strong, .document-content b {
-          font-weight: bold;
-        }
-
-        .document-content blockquote {
-          margin: 1.5rem 0 1.5rem 3rem;
-          padding-left: 1.5rem;
-          border-left: 3px solid #cbd5e0;
-          font-style: italic;
-          color: #2d3748;
-          text-indent: 0;
-        }
-
-        .document-content ul, .document-content ol {
-          margin: 1rem 0 1rem 3rem;
-          text-indent: 0;
-        }
-
-        .document-content li {
-          margin-bottom: 0.5rem;
-        }
-
-        .document-content hr {
-          margin: 2rem 0;
-          border: none;
-          border-top: 1px solid #e2e8f0;
+          transform: rotate(15deg);
+          border-radius: 4px;
+          font-size: 20px;
         }
 
         @media print {
-          @page {
-            size: A4;
-            margin: 2cm;
-          }
-
-          * {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-
           .no-print { display: none !important; }
-          
-          body { 
-            background: white !important; 
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-
-          .min-h-screen { 
-            padding: 0 !important;
-            background: white !important;
-          }
-
-          main { 
-            margin: 0 !important; 
-            max-width: 100% !important;
-            background: white !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-
+          body { background: white !important; }
           .document-sheet { 
             box-shadow: none !important; 
             border: none !important; 
             padding: 0 !important;
             margin: 0 !important;
-            min-height: unset !important;
           }
-
-          .document-content { 
-            font-size: 12pt !important;
-            line-height: 1.6 !important;
-          }
-
-          .document-content p {
-            page-break-inside: avoid;
-          }
-
-          .document-content h1, .document-content h2, .document-content h3 {
-            page-break-after: avoid;
-          }
+          .min-h-screen { padding: 0 !important; }
         }
 
         @media (max-width: 640px) {
-          .document-sheet { padding: 30px 20px; }
-          .document-content { font-size: 13px; }
+          .document-sheet { padding: 40px 20px; }
         }
       `}</style>
     </div>
