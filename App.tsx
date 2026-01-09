@@ -159,7 +159,7 @@ const App: React.FC = () => {
       <header className="w-full text-center mb-8 no-print">
         <div className="flex justify-center items-center gap-2 mb-2">
           <Scale className="w-10 h-10 text-blue-600" />
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">RecorreAI</h1>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Auto Recurso</h1>
         </div>
         <p className="text-slate-600 italic">Soluções jurídicas inteligentes para condutores.</p>
       </header>
@@ -442,7 +442,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-12 text-center text-slate-400 text-xs px-4 no-print">
-        <p className="font-bold tracking-widest uppercase mb-2">RecorreAI © 2025</p>
+        <p className="font-bold tracking-widest uppercase mb-2">Auto Recurso © 2025</p>
         <p className="max-w-md mx-auto leading-relaxed">
           Esta ferramenta utiliza inteligência artificial avançada para auxiliar na cidadania. O conteúdo gerado é uma sugestão de fundamentação baseada no CTB e não substitui o aconselhamento jurídico profissional.
         </p>
