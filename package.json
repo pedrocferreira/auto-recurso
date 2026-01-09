@@ -1,5 +1,5 @@
 {
-  "name": "recorreai---recurso-de-multas-inteligente",
+  "name": "auto-recurso",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,8 +11,10 @@
   "dependencies": {
     "@google/genai": "^1.34.0",
     "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react": "^19.2.3"
+    "react-markdown": "^10.1.0",
+    "rehype-raw": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

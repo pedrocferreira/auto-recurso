@@ -20,9 +20,9 @@ export const analyzeTicketImage = async (base64Image: string): Promise<TicketInf
         },
         {
           text: `Analise esta foto de uma multa de trânsito brasileira. Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). 
-          TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço.
-          IMPORTANTE: Se um dado não for encontrado, retorne uma string VAZIA (""). NUNCA retorne "Não visível", "N/A" ou algo similar.
-          Retorne os dados estritamente no formato JSON conforme o schema.`
+          TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis.
+          IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (""). NUNCA retorne textos como "Não visível", "N/A" ou similares.
+          Retorne os dados estritamente no formato JSON conforme o schema especificado.`
         }
       ]
     },
@@ -116,42 +116,59 @@ export const generateFinalAppeal = async (
 ): Promise<string> => {
   const ai = getAIClient();
   const strategy = ticketInfo.strategies.find(s => s.id === selectedStrategyId);
-  
-  const prompt = `
-    Aja como um advogado especialista em direito de trânsito brasileiro. 
-    Gere um recurso formal de infração de trânsito direcionado à JARI (Junta Administrativa de Recursos de Infrações).
-    
-    DADOS DO RECORRENTE:
-    - Nome: ${personalData.fullName}
-    - CPF: ${personalData.cpf}
-    - RG: ${personalData.rg}
-    - CNH: ${personalData.cnh}
-    - Endereço: ${personalData.address}
 
-    DADOS DA INFRAÇÃO:
+  const prompt = `
+    Aja como um renomado Advogado Especialista em Direito de Trânsito Brasileiro. 
+    Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO profissional e bem formatado em Markdown puro.
+
+    IMPORTANTE SOBRE FORMATAÇÃO:
+    - Use apenas Markdown puro (sem HTML, sem &nbsp;, sem tags <center>)
+    - Para centralizar texto, use espaços normais
+    - Use ** para negrito
+    - Use # para títulos quando necessário
+    - Use linhas em branco para separar parágrafos
+    - Use > para citações de artigos legais
+
+    ESTRUTURA DO DOCUMENTO:
+    1. CABEÇALHO CENTRALIZADO (use espaçamento para centralizar visualmente):
+       ILUSTRÍSSIMO SENHOR PRESIDENTE DA JARI
+       [Nome do órgão em CAIXA ALTA]
+
+    2. QUALIFICAÇÃO DO RECORRENTE (parágrafo corrido, formal)
+
+    3. I. DOS FATOS (relato objetivo e cronológico)
+
+    4. II. DO DIREITO / FUNDAMENTOS JURÍDICOS (use blockquote > para citar artigos do CTB)
+
+    5. III. DOS PEDIDOS (lista clara: cancelamento, baixa de pontos, arquivamento)
+
+    6. FECHAMENTO:
+       Pede Deferimento.
+       
+       [Cidade], [data por extenso]
+       
+       _________________________
+       [Nome completo]
+       CPF: [cpf]
+
+    DADOS FORNECIDOS:
+    - Recorrente: ${personalData.fullName}, CPF: ${personalData.cpf}, RG: ${personalData.rg}, CNH: ${personalData.cnh}
+    - Endereço: ${personalData.address}
     - Infração: ${ticketInfo.violationType}
-    - Artigo do CTB: ${ticketInfo.article}
+    - Artigo: ${ticketInfo.article}
     - Local: ${ticketInfo.location}
     - Data: ${ticketInfo.date}
-    - Placa do Veículo: ${ticketInfo.vehiclePlate}
-    - Órgão Autuador: ${ticketInfo.authority}
-    
-    Estratégia Escolhida: ${strategy?.title}
-    Fundamentação da Estratégia: ${strategy?.description}
-    Relato Personalizado do Condutor: ${userReason}
-    
-    O documento deve ser formal, completo e pronto para assinatura. NÃO USE PLACEHOLDERS como [NOME]. Use os dados fornecidos acima.
-    Inclua:
-    1. Endereçamento à JARI.
-    2. Qualificação completa do recorrente.
-    3. Exposição dos fatos e fundamentos jurídicos (cite o CTB).
-    4. O pedido final de cancelamento da penalidade e baixa da pontuação.
-    
-    Formate em Markdown.
+    - Placa: ${ticketInfo.vehiclePlate}
+    - Órgão: ${ticketInfo.authority}
+    - Tese: ${strategy?.title}
+    - Fundamentação: ${strategy?.description}
+    - Relato do Condutor: ${userReason}
+
+    Retorne APENAS o texto do recurso em Markdown puro, sem comentários ou explicações adicionais.
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents: prompt
   });
 
