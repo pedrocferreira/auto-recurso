@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { analyzeTicketImage, generateFinalAppeal, analyzeCNHImage } from './services/geminiService';
+import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
+import { createAbacatePayBilling, checkAbacatePayBillingStatus } from './services/paymentService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import {
   Camera,
@@ -35,12 +36,70 @@ const App: React.FC = () => {
     cpf: '',
     rg: '',
     cnh: '',
-    address: ''
+    address: '',
+    email: '',
+    phone: '',
+    isDifferentDriver: false,
+    driverFullName: '',
+    driverCpf: '',
+    driverRg: '',
+    driverCnh: '',
+    profession: '',
+    civilStatus: ''
   });
   const [finalDocument, setFinalDocument] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCnhProcessing, setIsCnhProcessing] = useState<boolean>(false);
   const [isPaying, setIsPaying] = useState<boolean>(false);
+
+  // Carregar dados salvos do localStorage ao iniciar
+  useEffect(() => {
+    const savedTicketInfo = localStorage.getItem('ticketInfo');
+    const savedSelectedStrategy = localStorage.getItem('selectedStrategy');
+    const savedUserReason = localStorage.getItem('userReason');
+    const savedPersonalData = localStorage.getItem('personalData');
+
+    if (savedTicketInfo) setTicketInfo(JSON.parse(savedTicketInfo));
+    if (savedSelectedStrategy) setSelectedStrategy(savedSelectedStrategy);
+    if (savedUserReason) setUserReason(savedUserReason);
+    if (savedPersonalData) {
+      const parsed = JSON.parse(savedPersonalData);
+      setPersonalData(prev => ({ ...prev, ...parsed }));
+    }
+  }, []);
+
+  // Salvar dados no localStorage quando mudarem
+  useEffect(() => {
+    if (ticketInfo) localStorage.setItem('ticketInfo', JSON.stringify(ticketInfo));
+  }, [ticketInfo]);
+
+  useEffect(() => {
+    if (selectedStrategy) localStorage.setItem('selectedStrategy', selectedStrategy);
+  }, [selectedStrategy]);
+
+  useEffect(() => {
+    localStorage.setItem('userReason', userReason);
+  }, [userReason]);
+
+  useEffect(() => {
+    localStorage.setItem('personalData', JSON.stringify(personalData));
+  }, [personalData]);
+
+  const validateCPF = (cpf: string) => {
+    cpf = cpf.replace(/[^\d]+/g, '');
+    if (cpf.length !== 11 || !!cpf.match(/(\d)\1{10}/)) return false;
+    let sum = 0;
+    for (let i = 1; i <= 9; i++) sum = sum + parseInt(cpf.substring(i - 1, i)) * (11 - i);
+    let rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    if (rest !== parseInt(cpf.substring(9, 10))) return false;
+    sum = 0;
+    for (let i = 1; i <= 10; i++) sum = sum + parseInt(cpf.substring(i - 1, i)) * (12 - i);
+    rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    if (rest !== parseInt(cpf.substring(10, 11))) return false;
+    return true;
+  };
 
   const cleanData = (text: string | undefined) => {
     if (!text) return '';
@@ -59,6 +118,34 @@ const App: React.FC = () => {
       }));
     }
   }, [ticketInfo]);
+
+  useEffect(() => {
+    const checkPayment = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('success') === 'true') {
+        const savedStep = localStorage.getItem('appStep');
+        const billingId = localStorage.getItem('billingId');
+
+        if (savedStep === AppStep.PAYMENT && billingId) {
+          try {
+            const status = await checkAbacatePayBillingStatus(billingId);
+            if (status === 'PAID' || status === 'CONFIRMED') {
+              handleGenerateDocument();
+            } else {
+              setError(`O pagamento ainda não foi confirmado (Status: ${status}).`);
+              setStep(AppStep.USER_DATA);
+            }
+          } catch (err) {
+            console.error("Erro ao verificar pagamento:", err);
+            // Em caso de erro na API de verificação, voltamos para a tela de dados
+            setError("Não conseguimos confirmar seu pagamento automaticamente. Por favor, tente novamente.");
+            setStep(AppStep.USER_DATA);
+          }
+        }
+      }
+    };
+    checkPayment();
+  }, []);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -82,6 +169,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCNHUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setIsCnhProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const data = await analyzeCNHImage(base64);
+        setPersonalData(prev => ({
+          ...prev,
+          fullName: data.fullName || prev.fullName,
+          cpf: data.cpf || prev.cpf,
+          rg: data.rg || prev.rg,
+          cnh: data.cnh || prev.cnh,
+          address: data.address || prev.address
+        }));
+        setIsCnhProcessing(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setError("Erro ao ler CNH.");
+      setIsCnhProcessing(false);
+    }
+  };
+
   const simulatePayment = () => {
     setIsPaying(true);
     setTimeout(() => {
@@ -91,13 +204,49 @@ const App: React.FC = () => {
   };
 
   const handleGenerateDocument = async () => {
-    if (!ticketInfo || !selectedStrategy) return;
+    let currentTicketInfo = ticketInfo;
+    let currentSelectedStrategy = selectedStrategy;
+    let currentUserReason = userReason;
+    let currentPersonalData = personalData;
+
+    // Recuperar do localStorage se o estado estiver vazio (pós-redirecionamento)
+    if (!currentTicketInfo) {
+      const saved = localStorage.getItem('ticketInfo');
+      if (saved) currentTicketInfo = JSON.parse(saved);
+    }
+    if (!currentSelectedStrategy) {
+      currentSelectedStrategy = localStorage.getItem('selectedStrategy');
+    }
+    if (!currentUserReason) {
+      currentUserReason = localStorage.getItem('userReason') || '';
+    }
+
+    // Sempre tenta recuperar dados pessoais do localStorage para garantir completude
+    const savedPersonalData = localStorage.getItem('personalData');
+    if (savedPersonalData) {
+      const parsed = JSON.parse(savedPersonalData);
+      currentPersonalData = { ...currentPersonalData, ...parsed };
+    }
+
+    if (!currentTicketInfo || !currentSelectedStrategy) {
+      setError("Dados insuficientes para gerar o recurso. Por favor, comece novamente.");
+      setStep(AppStep.START);
+      return;
+    }
+
     setIsProcessing(true);
     setStep(AppStep.GENERATING);
     try {
-      const doc = await generateFinalAppeal(ticketInfo, selectedStrategy, userReason, personalData);
+      const doc = await generateFinalAppeal(currentTicketInfo, currentSelectedStrategy, currentUserReason, currentPersonalData);
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
+      // Limpar localStorage após sucesso
+      localStorage.removeItem('appStep');
+      localStorage.removeItem('ticketInfo');
+      localStorage.removeItem('selectedStrategy');
+      localStorage.removeItem('userReason');
+      localStorage.removeItem('personalData');
+      localStorage.removeItem('billingId');
     } catch (err) {
       setError("Erro ao gerar recurso.");
       setStep(AppStep.USER_DATA);
@@ -106,7 +255,20 @@ const App: React.FC = () => {
     }
   };
 
-  const isFormValid = personalData.fullName && personalData.cpf && personalData.rg && personalData.cnh && personalData.address;
+  const isFormValid =
+    personalData.fullName &&
+    validateCPF(personalData.cpf) &&
+    personalData.rg &&
+    personalData.cnh &&
+    personalData.address &&
+    personalData.email &&
+    personalData.phone &&
+    (!personalData.isDifferentDriver || (
+      personalData.driverFullName &&
+      validateCPF(personalData.driverCpf || '') &&
+      personalData.driverRg &&
+      personalData.driverCnh
+    ));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
@@ -116,7 +278,7 @@ const App: React.FC = () => {
           <div className="bg-blue-600 p-2 rounded-lg">
             <Scale className="w-6 h-6 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">RECORRE<span className="text-blue-600">AI</span></h1>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">AUTO <span className="text-blue-600">RECURSO</span></h1>
         </div>
         <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
           <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
@@ -129,7 +291,7 @@ const App: React.FC = () => {
         <div className="w-full h-1.5 bg-slate-200 rounded-full mb-8 overflow-hidden no-print">
           <div
             className="h-full bg-blue-600 transition-all duration-500"
-            style={{ width: `${(Object.values(AppStep).indexOf(step) + 1) * 12.5}%` }}
+            style={{ width: `${(Object.values(AppStep).indexOf(step) + 1) * 11.1}%` }}
           />
         </div>
 
@@ -276,26 +438,167 @@ const App: React.FC = () => {
                   onChange={(e) => setPersonalData({ ...personalData, address: e.target.value })}
                   className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                 />
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="email" placeholder="E-mail" value={personalData.email}
+                    onChange={(e) => setPersonalData({ ...personalData, email: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                  <input
+                    type="tel" placeholder="Telefone" value={personalData.phone}
+                    onChange={(e) => setPersonalData({ ...personalData, phone: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <label className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={personalData.isDifferentDriver}
+                    onChange={(e) => setPersonalData({ ...personalData, isDifferentDriver: e.target.checked })}
+                    className="w-5 h-5 accent-blue-600"
+                  />
+                  <span className="text-sm font-bold text-blue-900">O condutor era outra pessoa?</span>
+                </label>
+
+                {personalData.isDifferentDriver && (
+                  <div className="space-y-4 animate-slideIn">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest pt-2">Dados do Condutor</h3>
+                    <input
+                      type="text" placeholder="Nome do Condutor" value={personalData.driverFullName}
+                      onChange={(e) => setPersonalData({ ...personalData, driverFullName: e.target.value })}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <input
+                        type="text" placeholder="CPF do Condutor" value={personalData.driverCpf}
+                        onChange={(e) => setPersonalData({ ...personalData, driverCpf: e.target.value })}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                      />
+                      <input
+                        type="text" placeholder="RG do Condutor" value={personalData.driverRg}
+                        onChange={(e) => setPersonalData({ ...personalData, driverRg: e.target.value })}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                      />
+                    </div>
+                    <input
+                      type="text" placeholder="CNH do Condutor" value={personalData.driverCnh}
+                      onChange={(e) => setPersonalData({ ...personalData, driverCnh: e.target.value })}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text" placeholder="Estado Civil" value={personalData.civilStatus}
+                    onChange={(e) => setPersonalData({ ...personalData, civilStatus: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                  <input
+                    type="text" placeholder="Profissão" value={personalData.profession}
+                    onChange={(e) => setPersonalData({ ...personalData, profession: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <div className="pt-4">
+                  <label className="flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 hover:border-blue-400 transition-all cursor-pointer">
+                    {isCnhProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ScanLine className="w-5 h-5" /> Importar dados da CNH</>}
+                    <input type="file" className="hidden" accept="image/*" onChange={handleCNHUpload} />
+                  </label>
+                </div>
               </div>
 
               {/* TELA DE CHECKOUT SIMULADA */}
-              <div className="bg-blue-900 text-white p-6 rounded-2xl mb-8">
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <p className="text-blue-300 text-xs font-black uppercase tracking-widest">Valor do Serviço</p>
-                    <p className="text-3xl font-black">R$ 47,90</p>
-                  </div>
-                  <ShieldCheck className="w-12 h-12 text-blue-400 opacity-50" />
-                </div>
-                <p className="text-blue-200 text-xs leading-relaxed mb-6">Pague uma única vez e tenha acesso ao recurso completo, pronto para imprimir e ganhar a causa.</p>
+              <div className="bg-blue-600 text-white p-6 rounded-2xl mb-8 text-center">
+                <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Valor da Consultoria Prévia</p>
+                <p className="text-4xl font-black mb-6">R$ 24,90</p>
                 <button
-                  disabled={!isFormValid || isPaying}
-                  onClick={simulatePayment}
-                  className="w-full py-4 bg-white text-blue-900 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3"
+                  disabled={!isFormValid || isProcessing}
+                  onClick={async () => {
+                    if (!isFormValid) return;
+                    setIsProcessing(true);
+                    setError(null);
+                    try {
+                      localStorage.setItem('appStep', AppStep.PAYMENT);
+                      const { url, id } = await createAbacatePayBilling(
+                        personalData.fullName,
+                        personalData.email,
+                        personalData.cpf,
+                        personalData.phone
+                      );
+                      localStorage.setItem('billingId', id);
+                      window.location.href = url;
+                    } catch (err: any) {
+                      setError(err.message || "Erro ao iniciar pagamento");
+                      setIsProcessing(false);
+                    }
+                  }}
+                  className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                 >
-                  {isPaying ? <Loader2 className="w-6 h-6 animate-spin" /> : <><CreditCard className="w-6 h-6" /> GERAR RECURSO AGORA</>}
+                  {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PROSSEGUIR PARA O PAGAMENTO"}
                 </button>
+                {error && <p className="mt-4 text-red-200 text-sm font-bold">{error}</p>}
               </div>
+            </div>
+          )}
+
+          {step === AppStep.PAYMENT && (
+            <div className="p-8 animate-slideIn text-center">
+              <h2 className="text-2xl font-black text-slate-900 mb-2">Pagamento via PIX</h2>
+              <p className="text-slate-500 mb-8 text-sm">Escaneie o QR Code ou copie a chave abaixo para finalizar.</p>
+
+              <div className="flex flex-col items-center justify-center mb-8">
+                <div className="bg-white p-4 rounded-2xl border-4 border-slate-100 mb-6 shadow-sm">
+                  {/* Placeholder do QR Code - Em uma implementação real aqui estaria o SVG/Img do PIX */}
+                  <div className="w-48 h-48 bg-slate-50 flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200">
+                    <div className="grid grid-cols-3 gap-1">
+                      {[...Array(9)].map((_, i) => (
+                        <div key={i} className="w-4 h-4 bg-slate-300 rounded-sm" />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full max-w-sm">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 flex items-center justify-between">
+                    <code className="text-xs font-mono text-slate-600 truncate mr-4">00020126330014BR.GOV.BCB.PIX0111...</code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText("00020126330014BR.GOV.BCB.PIX0111...");
+                        alert("Chave PIX copiada!");
+                      }}
+                      className="p-2 hover:bg-slate-200 rounded-lg transition-colors text-blue-600"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-green-50 border border-green-100 rounded-2xl p-6 mb-8 flex items-start gap-4 text-left">
+                <ShieldCheck className="w-6 h-6 text-green-600 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-green-900">Pagamento 100% Protegido</p>
+                  <p className="text-xs text-green-700">Seu recurso será liberado instantaneamente após a confirmação do pagamento.</p>
+                </div>
+              </div>
+
+              <button
+                disabled={isPaying}
+                onClick={simulatePayment}
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 shadow-xl flex items-center justify-center gap-3"
+              >
+                {isPaying ? <Loader2 className="w-6 h-6 animate-spin" /> : <>JÁ REALIZEI O PAGAMENTO</>}
+              </button>
+
+              <button
+                onClick={() => setStep(AppStep.USER_DATA)}
+                className="mt-6 text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors"
+              >
+                VOLTAR PARA MEUS DADOS
+              </button>
             </div>
           )}
 
@@ -332,7 +635,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
-        <p className="mb-4">© 2024 RECORREAI - Inteligência Artificial para Condutores.</p>
+        <p className="mb-4">© 2024 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
       </footer>
 

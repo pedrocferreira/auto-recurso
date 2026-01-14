@@ -5,6 +5,15 @@ export interface PersonalInfo {
   rg: string;
   cnh: string;
   address: string;
+  email: string;
+  phone: string;
+  isDifferentDriver?: boolean;
+  driverFullName?: string;
+  driverCpf?: string;
+  driverRg?: string;
+  driverCnh?: string;
+  profession?: string;
+  civilStatus?: string;
 }
 
 export interface TicketInfo {
@@ -31,6 +40,7 @@ export enum AppStep {
   STRATEGY_SELECTION = 'STRATEGY_SELECTION',
   USER_INPUT = 'USER_INPUT',
   USER_DATA = 'USER_DATA',
+  PAYMENT = 'PAYMENT',
   GENERATING = 'GENERATING',
   FINAL_DOCUMENT = 'FINAL_DOCUMENT'
 }
