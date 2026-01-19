@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  auto-recurso:
+    build:
+      context: .
+      args:
+        VITE_GEMINI_API_KEY: ${VITE_GEMINI_API_KEY}
+        VITE_ABACATE_PAY_API_KEY: ${VITE_ABACATE_PAY_API_KEY}
+        VITE_DEEPSEEK_API_KEY: ${VITE_DEEPSEEK_API_KEY}
+        VITE_BREVO_API_KEY: ${VITE_BREVO_API_KEY}
+    container_name: auto-recurso
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - webapps
+    environment:
+      - NODE_ENV=production
+
+networks:
+  webapps:
+    driver: bridge

@@ -1,16 +1,18 @@
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import Admin from './Admin';
 
-const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
-}
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement
+);
 
-const root = ReactDOM.createRoot(rootElement);
+// Simple routing
+const path = window.location.pathname;
+const Component = path === '/admin' ? Admin : App;
+
 root.render(
   <React.StrictMode>
-    <App />
+    <Component />
   </React.StrictMode>
 );

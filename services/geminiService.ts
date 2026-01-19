@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { TicketInfo, PersonalInfo } from "../types";
 
 const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 };
 
 // Modelo padrão definido nas diretrizes para tarefas básicas/médias
@@ -135,39 +135,67 @@ export const generateFinalAppeal = async (
   ticketInfo: TicketInfo,
   selectedStrategyId: string,
   userReason: string,
-  personalData: PersonalInfo
+  personalData: PersonalInfo,
+  city: string,
+  dateString: string
 ): Promise<string> => {
-  return withRetry(async () => {
-    const ai = getAIClient();
-    const strategy = ticketInfo.strategies.find(s => s.id === selectedStrategyId);
+  const ai = getAIClient();
+  const strategy = ticketInfo.strategies.find(s => s.id === selectedStrategyId);
 
-    const prompt = `
+  const prompt = `
     Aja como um renomado Advogado Especialista em Direito de Trânsito Brasileiro. 
-    Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO extremamente profissional e bem formatado.
+    Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO profissional e bem formatado em Markdown puro.
 
-    ESTRUTURA E ESTÉTICA DO DOCUMENTO:
-    1. CABEÇALHO: O endereçamento deve ser em CAIXA ALTA e negrito, centralizado visualmente.
-    2. QUALIFICAÇÃO: Apresente os dados do recorrente de forma elegante e fluida.
-    3. SEÇÕES: Use numerais romanos (I, II, III) para as seções principais.
-    4. CITAÇÕES LEGAIS: Use blocos de citação (blockquote) para destacar artigos do CTB ou resoluções.
-    5. ESPAÇAMENTO: Garanta linhas em branco entre os parágrafos.
-    6. LINGUAGEM: Use termos jurídicos adequados.
+    IMPORTANTE SOBRE FORMATAÇÃO:
+    - Use apenas Markdown puro (sem HTML, sem &nbsp;, sem tags <center>)
+    - Para centralizar texto, use espaços normais
+    - Use ** para negrito
+    - Use # para títulos quando necessário
+    - Use linhas em branco para separar parágrafos
+    - Use > para citações de artigos legais
 
-    DADOS:
-    - Recorrente: ${personalData.fullName}, CPF: ${personalData.cpf}, RG: ${personalData.rg}, CNH: ${personalData.cnh}, Endereço: ${personalData.address}
-    - Infração: ${ticketInfo.violationType}, Artigo: ${ticketInfo.article}, Local: ${ticketInfo.location}, Data: ${ticketInfo.date}, Placa: ${ticketInfo.vehiclePlate}, Órgão: ${ticketInfo.authority}
-    - Tese Jurídica: ${strategy?.title}
-    - Fundamentação da Tese: ${strategy?.description}
-    - Argumento Adicional do Usuário: ${userReason}
+    ESTRUTURA DO DOCUMENTO:
+    1. CABEÇALHO CENTRALIZADO (use espaçamento para centralizar visualmente):
+       ILUSTRÍSSIMO SENHOR PRESIDENTE DA JARI
+       [Nome do órgão em CAIXA ALTA]
 
-    O texto final deve ser em Markdown, pronto para impressão.
+    2. QUALIFICAÇÃO DO RECORRENTE (parágrafo corrido, formal)
+
+    3. I. DOS FATOS (relato objetivo e cronológico)
+
+    4. II. DO DIREITO / FUNDAMENTOS JURÍDICOS (use blockquote > para citar artigos do CTB)
+
+    5. III. DOS PEDIDOS (lista clara: cancelamento, baixa de pontos, arquivamento)
+
+    6. FECHAMENTO:
+       Pede Deferimento.
+       
+       ${city}, ${dateString}
+       
+       _________________________
+       [Nome completo]
+       CPF: [cpf]
+
+    DADOS FORNECIDOS:
+    - Recorrente: ${personalData.fullName}, CPF: ${personalData.cpf}, RG: ${personalData.rg}, CNH: ${personalData.cnh}
+    - Endereço: ${personalData.address}
+    - Infração: ${ticketInfo.violationType}
+    - Artigo: ${ticketInfo.article}
+    - Local: ${ticketInfo.location}
+    - Data: ${ticketInfo.date}
+    - Placa: ${ticketInfo.vehiclePlate}
+    - Órgão: ${ticketInfo.authority}
+    - Tese: ${strategy?.title}
+    - Fundamentação: ${strategy?.description}
+    - Relato do Condutor: ${userReason}
+
+    Retorne APENAS o texto do recurso em Markdown puro, sem comentários ou explicações adicionais.
   `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: prompt
-    });
-
-    return response.text || "Erro ao gerar o recurso.";
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: prompt
   });
+
+  return response.text || "Erro ao gerar o recurso.";
 };

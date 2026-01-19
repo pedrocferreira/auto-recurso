@@ -9,7 +9,7 @@ export interface AbacatePayBillingResponse {
 }
 
 export const createAbacatePayBilling = async (fullName: string, email: string, cpfOrCnpj: string, cellphone: string): Promise<{ url: string, id: string }> => {
-    const apiKey = process.env.ABACATE_PAY_API_KEY;
+    const apiKey = import.meta.env.VITE_ABACATE_PAY_API_KEY;
     if (!apiKey) {
         throw new Error("Abacate Pay API Key not found");
     }
@@ -39,7 +39,8 @@ export const createAbacatePayBilling = async (fullName: string, email: string, c
                 cellphone: cellphone.replace(/\D/g, '') // Remove pontuação do telefone
             },
             returnUrl: window.location.origin,
-            completionUrl: window.location.origin + "/?success=true"
+            completionUrl: window.location.origin + "/?success=true",
+            devMode: false
         })
     });
 
@@ -54,7 +55,7 @@ export const createAbacatePayBilling = async (fullName: string, email: string, c
 };
 
 export const checkAbacatePayBillingStatus = async (billingId: string): Promise<string> => {
-    const apiKey = process.env.ABACATE_PAY_API_KEY;
+    const apiKey = import.meta.env.VITE_ABACATE_PAY_API_KEY;
     if (!apiKey) throw new Error("Abacate Pay API Key not found");
 
     const response = await fetch("/api-abacate/v1/billing/list", {

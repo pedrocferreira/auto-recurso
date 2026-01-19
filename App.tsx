@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
 import { createAbacatePayBilling, checkAbacatePayBillingStatus } from './services/paymentService';
+import { logEvent, registerResource, getAdminSettings, incrementFreeUsage, AdminSettings } from './services/analyticsService';
+import { sendResourceEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import {
   Camera,
@@ -51,6 +53,9 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCnhProcessing, setIsCnhProcessing] = useState<boolean>(false);
   const [isPaying, setIsPaying] = useState<boolean>(false);
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>(getAdminSettings());
+
+  const [dataLoaded, setDataLoaded] = useState<boolean>(false);
 
   // Carregar dados salvos do localStorage ao iniciar
   useEffect(() => {
@@ -66,6 +71,7 @@ const App: React.FC = () => {
       const parsed = JSON.parse(savedPersonalData);
       setPersonalData(prev => ({ ...prev, ...parsed }));
     }
+    setDataLoaded(true);
   }, []);
 
   // Salvar dados no localStorage quando mudarem
@@ -82,8 +88,10 @@ const App: React.FC = () => {
   }, [userReason]);
 
   useEffect(() => {
-    localStorage.setItem('personalData', JSON.stringify(personalData));
-  }, [personalData]);
+    if (dataLoaded) {
+      localStorage.setItem('personalData', JSON.stringify(personalData));
+    }
+  }, [personalData, dataLoaded]);
 
   const validateCPF = (cpf: string) => {
     cpf = cpf.replace(/[^\d]+/g, '');
@@ -130,13 +138,16 @@ const App: React.FC = () => {
           try {
             const status = await checkAbacatePayBillingStatus(billingId);
             if (status === 'PAID' || status === 'CONFIRMED') {
+              logEvent('payment_completed', { billingId, amount: 24.90 });
               handleGenerateDocument();
             } else {
+              logEvent('payment_failed', { billingId, errorMessage: `Status: ${status}` });
               setError(`O pagamento ainda não foi confirmado (Status: ${status}).`);
               setStep(AppStep.USER_DATA);
             }
           } catch (err) {
             console.error("Erro ao verificar pagamento:", err);
+            logEvent('payment_failed', { billingId, errorMessage: String(err) });
             // Em caso de erro na API de verificação, voltamos para a tela de dados
             setError("Não conseguimos confirmar seu pagamento automaticamente. Por favor, tente novamente.");
             setStep(AppStep.USER_DATA);
@@ -234,10 +245,97 @@ const App: React.FC = () => {
       return;
     }
 
+    // Validação rigorosa dos campos
+    const isValid =
+      currentPersonalData.fullName &&
+      currentPersonalData.cpf &&
+      currentPersonalData.rg &&
+      currentPersonalData.cnh &&
+      currentPersonalData.address;
+
+    if (!isValid) {
+      setError("Por favor, preencha todos os campos obrigatórios para gerar o recurso.");
+      setStep(AppStep.USER_DATA);
+      setIsProcessing(false);
+      return;
+    }
+
     setIsProcessing(true);
     setStep(AppStep.GENERATING);
     try {
-      const doc = await generateFinalAppeal(currentTicketInfo, currentSelectedStrategy, currentUserReason, currentPersonalData);
+      // Extrair cidade do endereço (tentativa simples)
+      let city = "Cidade";
+      if (currentPersonalData.address) {
+        const parts = currentPersonalData.address.split('-');
+        if (parts.length > 1) {
+          city = parts[parts.length - 1].trim(); // Pega o último pedaço após traço (Ex: Rua X - Cidade/UF)
+        } else {
+          // Tenta pegar último pedaço após vírgula se não tiver traço
+          const commaParts = currentPersonalData.address.split(',');
+          if (commaParts.length > 1) city = commaParts[commaParts.length - 1].trim();
+        }
+      }
+
+      // Format Data
+      const today = new Date();
+      const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dateString = `${today.getDate()} de ${months[today.getMonth()]} de ${today.getFullYear()}`;
+
+      const doc = await generateFinalAppeal(
+        currentTicketInfo,
+        currentSelectedStrategy,
+        currentUserReason,
+        currentPersonalData,
+        city,
+        dateString
+      );
+
+      logEvent('resource_generated', {
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        customerCpf: currentPersonalData.cpf,
+        ticketPlate: currentTicketInfo.vehiclePlate,
+        ticketArticle: currentTicketInfo.article
+      });
+
+      // Register complete resource data
+      const strategy = currentTicketInfo.strategies.find(s => s.id === currentSelectedStrategy);
+      registerResource({
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        customerCpf: currentPersonalData.cpf,
+        customerPhone: currentPersonalData.phone,
+        customerRg: currentPersonalData.rg,
+        customerCnh: currentPersonalData.cnh,
+        customerAddress: currentPersonalData.address,
+        ticketPlate: currentTicketInfo.vehiclePlate,
+        ticketArticle: currentTicketInfo.article,
+        ticketLocation: currentTicketInfo.location,
+        ticketDate: currentTicketInfo.date,
+        strategy: strategy?.title,
+        documentContent: doc
+      });
+
+      // Send email with resource
+      try {
+        await sendResourceEmail(
+          currentPersonalData.email,
+          currentPersonalData.fullName,
+          doc,
+          currentTicketInfo.vehiclePlate
+        );
+        console.log('Email sent successfully to:', currentPersonalData.email);
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+        logEvent('email_failed', {
+          customerName: currentPersonalData.fullName,
+          customerEmail: currentPersonalData.email,
+          ticketPlate: currentTicketInfo.vehiclePlate,
+          errorMessage: emailError instanceof Error ? emailError.message : 'Erro desconhecido ao enviar email'
+        });
+        // Don't fail the entire flow if email fails
+      }
+
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
       // Limpar localStorage após sucesso
@@ -248,6 +346,11 @@ const App: React.FC = () => {
       localStorage.removeItem('personalData');
       localStorage.removeItem('billingId');
     } catch (err) {
+      logEvent('generation_error', {
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        errorMessage: String(err)
+      });
       setError("Erro ao gerar recurso.");
       setStep(AppStep.USER_DATA);
     } finally {
@@ -300,7 +403,7 @@ const App: React.FC = () => {
           {step === AppStep.START && (
             <div className="p-8 md:p-12 text-center animate-fadeIn">
               <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6">
-                Tecnologia Jurídica 2024
+                Tecnologia Jurídica 2025
               </span>
               <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6 leading-tight">
                 Anule sua multa sem precisar de advogado.
@@ -512,33 +615,84 @@ const App: React.FC = () => {
 
               {/* TELA DE CHECKOUT SIMULADA */}
               <div className="bg-blue-600 text-white p-6 rounded-2xl mb-8 text-center">
-                <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Valor da Consultoria Prévia</p>
-                <p className="text-4xl font-black mb-6">R$ 24,90</p>
-                <button
-                  disabled={!isFormValid || isProcessing}
-                  onClick={async () => {
-                    if (!isFormValid) return;
-                    setIsProcessing(true);
-                    setError(null);
-                    try {
-                      localStorage.setItem('appStep', AppStep.PAYMENT);
-                      const { url, id } = await createAbacatePayBilling(
-                        personalData.fullName,
-                        personalData.email,
-                        personalData.cpf,
-                        personalData.phone
-                      );
-                      localStorage.setItem('billingId', id);
-                      window.location.href = url;
-                    } catch (err: any) {
-                      setError(err.message || "Erro ao iniciar pagamento");
-                      setIsProcessing(false);
-                    }
-                  }}
-                  className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PROSSEGUIR PARA O PAGAMENTO"}
-                </button>
+                {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? (
+                  <>
+                    <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Modo Cortesia Ativado</p>
+                    <p className="text-4xl font-black mb-6">GRÁTIS</p>
+                    <button
+                      disabled={!isFormValid || isProcessing}
+                      onClick={async () => {
+                        if (!isFormValid) return;
+                        setIsProcessing(true);
+                        setError(null);
+                        try {
+                          logEvent('payment_completed', {
+                            customerName: personalData.fullName,
+                            customerEmail: personalData.email,
+                            amount: 0,
+                            isFree: true
+                          });
+                          incrementFreeUsage();
+                          await handleGenerateDocument();
+                        } catch (err: any) {
+                          setError(err.message || "Erro ao gerar recurso grátis");
+                          setIsProcessing(false);
+                        }
+                      }}
+                      className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "GERAR MEU RECURSO GRÁTIS"}
+                    </button>
+                    <p className="mt-4 text-blue-100 text-[10px] font-bold uppercase">Restam {adminSettings.freeGenerationLimit - adminSettings.freeGenerationsUsed} recursos gratuitos hoje</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Valor da Consultoria Prévia</p>
+                    <p className="text-4xl font-black mb-6">R$ 24,90</p>
+                    <button
+                      disabled={!isFormValid || isProcessing}
+                      onClick={async () => {
+                        if (!isFormValid) return;
+                        setIsProcessing(true);
+                        setError(null);
+                        try {
+                          localStorage.setItem('appStep', AppStep.PAYMENT);
+                          // Force save personal data before redirect
+                          localStorage.setItem('personalData', JSON.stringify(personalData));
+
+                          logEvent('payment_started', {
+                            customerName: personalData.fullName,
+                            customerEmail: personalData.email,
+                            customerCpf: personalData.cpf,
+                            customerPhone: personalData.phone,
+                            ticketPlate: ticketInfo?.vehiclePlate,
+                            ticketArticle: ticketInfo?.article,
+                            amount: 24.90
+                          });
+
+                          const { url, id } = await createAbacatePayBilling(
+                            personalData.fullName,
+                            personalData.email,
+                            personalData.cpf,
+                            personalData.phone
+                          );
+                          localStorage.setItem('billingId', id);
+                          window.location.href = url;
+                        } catch (err: any) {
+                          logEvent('payment_failed', {
+                            customerEmail: personalData.email,
+                            errorMessage: err.message || "Erro ao iniciar pagamento"
+                          });
+                          setError(err.message || "Erro ao iniciar pagamento");
+                          setIsProcessing(false);
+                        }
+                      }}
+                      className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PROSSEGUIR PARA O PAGAMENTO"}
+                    </button>
+                  </>
+                )}
                 {error && <p className="mt-4 text-red-200 text-sm font-bold">{error}</p>}
               </div>
             </div>
@@ -635,7 +789,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
-        <p className="mb-4">© 2024 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
+        <p className="mb-4">© 2025 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
       </footer>
 
