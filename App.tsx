@@ -382,6 +382,9 @@ const App: React.FC = () => {
             <Scale className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tighter">AUTO <span className="text-blue-600">RECURSO</span></h1>
+          {import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') && (
+            <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-black rounded border border-amber-200">DEV MODE</span>
+          )}
         </div>
         <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
           <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
@@ -689,7 +692,8 @@ const App: React.FC = () => {
                       }}
                       className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                     >
-                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PROSSEGUIR PARA O PAGAMENTO"}
+                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> :
+                        (import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') ? "TESTAR PAGAMENTO (DEV)" : "PROSSEGUIR PARA O PAGAMENTO")}
                     </button>
                   </>
                 )}

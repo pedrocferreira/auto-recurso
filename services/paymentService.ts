@@ -40,7 +40,7 @@ export const createAbacatePayBilling = async (fullName: string, email: string, c
             },
             returnUrl: window.location.origin,
             completionUrl: window.location.origin + "/?success=true",
-            devMode: false
+            devMode: apiKey.startsWith('abc_dev_')
         })
     });
 

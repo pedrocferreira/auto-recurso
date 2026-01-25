@@ -23,7 +23,7 @@ import {
     Zap
 } from 'lucide-react';
 
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_PASSWORD = '9cce22f2';
 
 type TabType = 'overview' | 'customers' | 'resources' | 'logs' | 'abandoned' | 'settings';
 
