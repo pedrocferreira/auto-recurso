@@ -616,149 +616,183 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* TELA DE CHECKOUT SIMULADA */}
-              <div className="bg-blue-600 text-white p-6 rounded-2xl mb-8 text-center">
-                {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? (
-                  <>
-                    <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Modo Cortesia Ativado</p>
-                    <p className="text-4xl font-black mb-6">GRÁTIS</p>
-                    <button
-                      disabled={!isFormValid || isProcessing}
-                      onClick={async () => {
-                        if (!isFormValid) return;
-                        setIsProcessing(true);
-                        setError(null);
-                        try {
-                          logEvent('payment_completed', {
-                            customerName: personalData.fullName,
-                            customerEmail: personalData.email,
-                            amount: 0,
-                            isFree: true
-                          });
-                          incrementFreeUsage();
-                          await handleGenerateDocument();
-                        } catch (err: any) {
-                          setError(err.message || "Erro ao gerar recurso grátis");
-                          setIsProcessing(false);
-                        }
-                      }}
-                      className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
-                    >
-                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "GERAR MEU RECURSO GRÁTIS"}
-                    </button>
-                    <p className="mt-4 text-blue-100 text-[10px] font-bold uppercase">Restam {adminSettings.freeGenerationLimit - adminSettings.freeGenerationsUsed} recursos gratuitos hoje</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-2">Valor da Consultoria Prévia</p>
-                    <p className="text-4xl font-black mb-6">R$ 24,90</p>
-                    <button
-                      disabled={!isFormValid || isProcessing}
-                      onClick={async () => {
-                        if (!isFormValid) return;
-                        setIsProcessing(true);
-                        setError(null);
-                        try {
-                          localStorage.setItem('appStep', AppStep.PAYMENT);
-                          // Force save personal data before redirect
-                          localStorage.setItem('personalData', JSON.stringify(personalData));
-
-                          logEvent('payment_started', {
-                            customerName: personalData.fullName,
-                            customerEmail: personalData.email,
-                            customerCpf: personalData.cpf,
-                            customerPhone: personalData.phone,
-                            ticketPlate: ticketInfo?.vehiclePlate,
-                            ticketArticle: ticketInfo?.article,
-                            amount: 24.90
-                          });
-
-                          const { url, id } = await createAbacatePayBilling(
-                            personalData.fullName,
-                            personalData.email,
-                            personalData.cpf,
-                            personalData.phone
-                          );
-                          localStorage.setItem('billingId', id);
-                          window.location.href = url;
-                        } catch (err: any) {
-                          logEvent('payment_failed', {
-                            customerEmail: personalData.email,
-                            errorMessage: err.message || "Erro ao iniciar pagamento"
-                          });
-                          setError(err.message || "Erro ao iniciar pagamento");
-                          setIsProcessing(false);
-                        }
-                      }}
-                      className="w-full py-4 bg-white text-blue-600 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
-                    >
-                      {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> :
-                        (import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') ? "TESTAR PAGAMENTO (DEV)" : "PROSSEGUIR PARA O PAGAMENTO")}
-                    </button>
-                  </>
-                )}
-                {error && <p className="mt-4 text-red-200 text-sm font-bold">{error}</p>}
-              </div>
+              <button
+                disabled={!isFormValid || isProcessing}
+                onClick={() => {
+                  if (!isFormValid) return;
+                  setStep(AppStep.PAYMENT);
+                  window.scrollTo(0, 0);
+                }}
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                PROSSEGUIR PARA PAGAMENTO
+                <ChevronRight className="w-6 h-6" />
+              </button>
             </div>
           )}
 
           {step === AppStep.PAYMENT && (
-            <div className="p-8 animate-slideIn text-center">
-              <h2 className="text-2xl font-black text-slate-900 mb-2">Pagamento via PIX</h2>
-              <p className="text-slate-500 mb-8 text-sm">Escaneie o QR Code ou copie a chave abaixo para finalizar.</p>
+            <div className="p-8 md:p-12 animate-slideIn">
+              <div className="text-center mb-10">
+                <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-4">
+                  Última Etapa
+                </span>
+                <h2 className="text-3xl font-black text-slate-900 mb-2">Revisão do seu Recurso</h2>
+                <p className="text-slate-500 font-medium">Confira os detalhes antes de gerar o documento oficial.</p>
+              </div>
 
-              <div className="flex flex-col items-center justify-center mb-8">
-                <div className="bg-white p-4 rounded-2xl border-4 border-slate-100 mb-6 shadow-sm">
-                  {/* Placeholder do QR Code - Em uma implementação real aqui estaria o SVG/Img do PIX */}
-                  <div className="w-48 h-48 bg-slate-50 flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200">
-                    <div className="grid grid-cols-3 gap-1">
-                      {[...Array(9)].map((_, i) => (
-                        <div key={i} className="w-4 h-4 bg-slate-300 rounded-sm" />
-                      ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+                <div className="space-y-6">
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <FileText className="w-4 h-4" /> Resumo do Pedido
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Serviço:</span>
+                        <span className="text-slate-900 font-bold">Recurso de Multa IA</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Placa:</span>
+                        <span className="text-slate-900 font-bold">{ticketInfo?.vehiclePlate}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Estratégia:</span>
+                        <span className="text-slate-900 font-bold truncate max-w-[150px]">
+                          {ticketInfo?.strategies.find(s => s.id === selectedStrategy)?.title}
+                        </span>
+                      </div>
+                      <div className="h-px bg-slate-200 my-2" />
+                      <div className="flex justify-between items-center text-lg">
+                        <span className="text-slate-900 font-black">Total:</span>
+                        <span className="text-blue-600 font-black text-2xl">
+                          {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? "GRÁTIS" : "R$ 24,90"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3 p-4 bg-green-50 rounded-xl border border-green-100">
+                      <ShieldCheck className="w-5 h-5 text-green-600" />
+                      <span className="text-sm font-bold text-green-800 font-medium">Garantia de conformidade com o CTB</span>
+                    </div>
+                    <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                      <Zap className="w-5 h-5 text-blue-600" />
+                      <span className="text-sm font-bold text-blue-800 font-medium">Emissão instantânea após pagamento</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="w-full max-w-sm">
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 flex items-center justify-between">
-                    <code className="text-xs font-mono text-slate-600 truncate mr-4">00020126330014BR.GOV.BCB.PIX0111...</code>
+                <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-2xl flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-xl font-black mb-4 flex items-center gap-2">
+                      <Lock className="w-5 h-5 text-blue-400" /> Checkout Seguro
+                    </h3>
+                    <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                      Seu pagamento será processado de forma segura via PIX. O documento será enviado para: <br />
+                      <span className="text-white font-bold">{personalData.email}</span>
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? (
+                      <button
+                        disabled={isProcessing}
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          setError(null);
+                          try {
+                            logEvent('payment_completed', {
+                              customerName: personalData.fullName,
+                              customerEmail: personalData.email,
+                              amount: 0,
+                              isFree: true
+                            });
+                            incrementFreeUsage();
+                            await handleGenerateDocument();
+                          } catch (err: any) {
+                            setError(err.message || "Erro ao gerar recurso grátis");
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="w-full py-5 bg-white text-slate-900 rounded-2xl font-black text-lg hover:bg-slate-100 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin text-blue-600" /> : "GERAR RECURSO GRÁTIS"}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isProcessing}
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          setError(null);
+                          try {
+                            localStorage.setItem('appStep', AppStep.PAYMENT);
+                            localStorage.setItem('personalData', JSON.stringify(personalData));
+
+                            logEvent('payment_started', {
+                              customerName: personalData.fullName,
+                              customerEmail: personalData.email,
+                              customerCpf: personalData.cpf,
+                              customerPhone: personalData.phone,
+                              ticketPlate: ticketInfo?.vehiclePlate,
+                              ticketArticle: ticketInfo?.article,
+                              amount: 24.90
+                            });
+
+                            const { url, id } = await createAbacatePayBilling(
+                              personalData.fullName,
+                              personalData.email,
+                              personalData.cpf,
+                              personalData.phone
+                            );
+                            localStorage.setItem('billingId', id);
+                            window.location.href = url;
+                          } catch (err: any) {
+                            logEvent('payment_failed', {
+                              customerEmail: personalData.email,
+                              errorMessage: err.message || "Erro ao iniciar pagamento"
+                            });
+                            setError(err.message || "Erro ao iniciar pagamento");
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> :
+                          (import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') ? "PAGAR AGORA (MODO DEV)" : "PAGAR VIA PIX")}
+                      </button>
+                    )}
+
                     <button
-                      onClick={() => {
-                        navigator.clipboard.writeText("00020126330014BR.GOV.BCB.PIX0111...");
-                        alert("Chave PIX copiada!");
-                      }}
-                      className="p-2 hover:bg-slate-200 rounded-lg transition-colors text-blue-600"
+                      onClick={() => setStep(AppStep.USER_DATA)}
+                      className="w-full py-2 text-slate-400 font-bold text-xs hover:text-white transition-colors"
                     >
-                      <Copy className="w-4 h-4" />
+                      ALTERAR DADOS DE CADASTRO
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-green-50 border border-green-100 rounded-2xl p-6 mb-8 flex items-start gap-4 text-left">
-                <ShieldCheck className="w-6 h-6 text-green-600 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-bold text-green-900">Pagamento 100% Protegido</p>
-                  <p className="text-xs text-green-700">Seu recurso será liberado instantaneamente após a confirmação do pagamento.</p>
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-center gap-3 mb-6">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <p className="text-sm font-bold">{error}</p>
+                </div>
+              )}
+
+              <div className="flex justify-center items-center gap-8 opacity-50 grayscale transition-all hover:grayscale-0">
+                <img src="https://img.icons8.com/color/48/000000/pix.png" alt="PIX" className="h-6" />
+                <div className="flex items-center gap-1 font-black text-slate-400 text-[10px] tracking-widest uppercase">
+                  <ShieldCheck className="w-4 h-4" /> Pagamento Seguro
+                </div>
+                <div className="font-black text-slate-400 text-[10px] tracking-widest uppercase">
+                  AbacatePay
                 </div>
               </div>
-
-              <button
-                disabled={isPaying}
-                onClick={simulatePayment}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 shadow-xl flex items-center justify-center gap-3"
-              >
-                {isPaying ? <Loader2 className="w-6 h-6 animate-spin" /> : <>JÁ REALIZEI O PAGAMENTO</>}
-              </button>
-
-              <button
-                onClick={() => setStep(AppStep.USER_DATA)}
-                className="mt-6 text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors"
-              >
-                VOLTAR PARA MEUS DADOS
-              </button>
             </div>
           )}
+
 
           {step === AppStep.FINAL_DOCUMENT && (
             <div className="p-8 animate-fadeIn">
@@ -790,7 +824,7 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-      </main>
+      </main >
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
         <p className="mb-4">© 2025 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
@@ -850,7 +884,7 @@ const App: React.FC = () => {
           .document-sheet { padding: 40px 20px; }
         }
       `}</style>
-    </div>
+    </div >
   );
 };
 
