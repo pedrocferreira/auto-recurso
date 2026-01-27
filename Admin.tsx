@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getEvents, getStats, getAbandonedCarts, clearAllData, AnalyticsEvent, getCustomers, getResources, CustomerRecord, ResourceRecord, getAdminSettings, updateAdminSettings, AdminSettings } from './services/analyticsService';
+import { getAdminData, updateAdminSettings, clearAllData, logEvent } from './services/analyticsService';
 import { sendResourceEmail, sendCartRecoveryEmail } from './services/emailService';
+import { AnalyticsEvent, CustomerRecord, ResourceRecord, AdminSettings } from './types';
 import ReactMarkdown from 'react-markdown';
 import {
     TrendingUp,
@@ -23,25 +24,23 @@ import {
     Zap
 } from 'lucide-react';
 
-const ADMIN_PASSWORD = '9cce22f2';
-
 type TabType = 'overview' | 'customers' | 'resources' | 'logs' | 'abandoned' | 'settings';
 
 const Admin: React.FC = () => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [password, setPassword] = useState('');
     const [activeTab, setActiveTab] = useState<TabType>('overview');
-    const [stats, setStats] = useState(getStats());
+    const [stats, setStats] = useState<any>({});
     const [events, setEvents] = useState<AnalyticsEvent[]>([]);
     const [customers, setCustomers] = useState<CustomerRecord[]>([]);
     const [resources, setResources] = useState<ResourceRecord[]>([]);
-    const [abandonedCarts, setAbandonedCarts] = useState(getAbandonedCarts());
+    const [abandonedCarts, setAbandonedCarts] = useState<any[]>([]);
     const [filterType, setFilterType] = useState<string>('all');
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [selectedResource, setSelectedResource] = useState<ResourceRecord | null>(null);
     const [sendingEmail, setSendingEmail] = useState<string | null>(null);
     const [emailStatus, setEmailStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-    const [adminSettings, setAdminSettings] = useState<AdminSettings>(getAdminSettings());
+    const [adminSettings, setAdminSettings] = useState<AdminSettings | any>({});
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -49,22 +48,48 @@ const Admin: React.FC = () => {
         }
     }, [isAuthenticated]);
 
-    const loadData = () => {
-        setStats(getStats());
-        setEvents(getEvents().reverse());
-        setCustomers(getCustomers().sort((a, b) => b.lastActivity - a.lastActivity));
-        setResources(getResources().sort((a, b) => b.generatedAt - a.generatedAt));
-        setAbandonedCarts(getAbandonedCarts());
-        setAdminSettings(getAdminSettings());
+    const loadData = async () => {
+        try {
+            const data = await getAdminData();
+            setEvents(data.events.reverse());
+            setCustomers(data.customers.sort((a: any, b: any) => b.lastActivity - a.lastActivity));
+            setResources(data.resources.sort((a: any, b: any) => b.generatedAt - a.generatedAt));
+            setAbandonedCarts(data.abandonedCarts);
+            setAdminSettings(data.settings);
+
+            // Calculate basic stats manually if needed, or get from data
+            const last24h = Date.now() - (24 * 60 * 60 * 1000);
+            setStats({
+                totalResources: data.resources.length,
+                resources24h: data.resources.filter((r: any) => r.generatedAt >= last24h).length,
+                totalRevenue: data.events.filter((e: any) => e.type === 'payment_completed').reduce((sum: number, e: any) => sum + (e.data.amount || 24.9), 0),
+                payments24h: data.events.filter((e: any) => e.type === 'payment_completed' && e.timestamp >= last24h).length,
+                totalErrors: data.events.filter((e: any) => e.type === 'generation_error').length,
+                successRate: data.resources.length > 0 ? ((data.resources.length / data.events.filter((e: any) => e.type === 'payment_completed').length || 1) * 100).toFixed(1) : '0'
+            });
+        } catch (err) {
+            console.error('Failed to load admin data:', err);
+        }
     };
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (password === ADMIN_PASSWORD) {
-            setIsAuthenticated(true);
-            setPassword('');
-        } else {
-            alert('Senha incorreta');
+        try {
+            const response = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const result = await response.json();
+            if (result.success) {
+                setIsAuthenticated(true);
+                setPassword('');
+            } else {
+                alert(result.message || 'Senha incorreta');
+            }
+        } catch (err) {
+            console.error('Login error:', err);
+            alert('Erro ao conectar ao servidor de autenticação');
         }
     };
 
@@ -91,7 +116,7 @@ const Admin: React.FC = () => {
         setSendingEmail(event.id);
         setEmailStatus(null);
         try {
-            const resource = getResources().find(r => r.customerEmail === event.data.customerEmail);
+            const resource = resources.find(r => r.customerEmail === event.data.customerEmail);
             if (!resource || !resource.documentContent) {
                 const errorMsg = 'Recurso não encontrado no sistema';
                 console.error('❌ Resource not found for:', event.data.customerEmail);

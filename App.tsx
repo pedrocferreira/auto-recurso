@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
 import { createAbacatePayBilling, checkAbacatePayBillingStatus } from './services/paymentService';
-import { logEvent, registerResource, getAdminSettings, incrementFreeUsage, AdminSettings } from './services/analyticsService';
-import { sendResourceEmail } from './services/emailService';
+import { logEvent, registerResource, getAdminData } from './services/analyticsService';
+import { sendResourceEmail, sendPdfEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
+import PrivacyPolicy from './PrivacyPolicy';
 import {
   Camera,
   Upload,
@@ -53,12 +54,12 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCnhProcessing, setIsCnhProcessing] = useState<boolean>(false);
   const [isPaying, setIsPaying] = useState<boolean>(false);
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>(getAdminSettings());
+  const [adminSettings, setAdminSettings] = useState<any>({});
+  const [showPrivacy, setShowPrivacy] = useState<boolean>(false);
 
   const [dataLoaded, setDataLoaded] = useState<boolean>(false);
 
-  // Carregar dados salvos do localStorage ao iniciar
-  useEffect(() => {
+  const loadInitialData = async () => {
     const savedTicketInfo = localStorage.getItem('ticketInfo');
     const savedSelectedStrategy = localStorage.getItem('selectedStrategy');
     const savedUserReason = localStorage.getItem('userReason');
@@ -71,7 +72,20 @@ const App: React.FC = () => {
       const parsed = JSON.parse(savedPersonalData);
       setPersonalData(prev => ({ ...prev, ...parsed }));
     }
+
+    // Fetch admin settings from backend
+    try {
+      const data = await getAdminData();
+      setAdminSettings(data.settings);
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+
     setDataLoaded(true);
+  };
+
+  useEffect(() => {
+    loadInitialData();
   }, []);
 
   // Salvar dados no localStorage quando mudarem
@@ -336,6 +350,20 @@ const App: React.FC = () => {
         // Don't fail the entire flow if email fails
       }
 
+      // Enviar PDF por email
+      try {
+        await sendPdfEmail(
+          currentPersonalData.email,
+          currentPersonalData.fullName,
+          doc,
+          `Seu Recurso de Trânsito - ${currentTicketInfo.vehiclePlate}`
+        );
+        console.log('PDF email sent successfully to:', currentPersonalData.email);
+      } catch (pdfEmailError) {
+        console.error('Failed to send PDF email:', pdfEmailError);
+        // Don't fail the entire flow if PDF email fails
+      }
+
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
       // Limpar localStorage após sucesso
@@ -373,6 +401,11 @@ const App: React.FC = () => {
       personalData.driverCnh
     ));
 
+  // Show Privacy Policy page if requested
+  if (showPrivacy) {
+    return <PrivacyPolicy onBack={() => setShowPrivacy(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
       {/* Header Premium */}
@@ -404,36 +437,71 @@ const App: React.FC = () => {
         <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden ${step === AppStep.FINAL_DOCUMENT ? 'print:shadow-none print:border-none' : ''}`}>
 
           {step === AppStep.START && (
-            <div className="p-8 md:p-12 text-center animate-fadeIn">
-              <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6">
-                Tecnologia Jurídica 2025
-              </span>
-              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6 leading-tight">
-                Anule sua multa sem precisar de advogado.
-              </h2>
-              <p className="text-slate-600 text-lg mb-10 max-w-xl mx-auto leading-relaxed">
-                Nossa IA analisa o Código de Trânsito Brasileiro em tempo real para encontrar erros na sua multa e gerar o recurso perfeito.
-              </p>
+            <div className="p-8 md:p-12 animate-fadeIn">
+              {/* Hero Section */}
+              <div className="text-center mb-10">
+                <span className="inline-block px-4 py-1.5 bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6 border border-blue-200/50">
+                  ✨ Inteligência Artificial Jurídica
+                </span>
+                <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 leading-tight">
+                  Anule sua multa em <span className="text-blue-600">3 passos.</span>
+                </h2>
+                <p className="text-slate-500 text-lg max-w-xl mx-auto">
+                  Nossa IA analisa o CTB em tempo real e gera defesas com mais de 90% de precisão técnica.
+                </p>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10 text-left max-w-lg mx-auto">
-                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
-                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                  <p className="text-sm font-bold text-slate-700">Identifica erros de preenchimento automaticamente.</p>
-                </div>
-                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
-                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                  <p className="text-sm font-bold text-slate-700">Cita jurisprudência e resoluções do CONTRAN.</p>
+              {/* How To Steps */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                {[
+                  { num: '1', icon: <Camera className="w-8 h-8" />, title: 'Envie a Multa', desc: 'Fotografe o auto de infração ou a notificação. Quanto mais legível, melhor a análise.' },
+                  { num: '2', icon: <Scale className="w-8 h-8" />, title: 'Escolha a Tese', desc: 'A IA identifica falhas e sugere teses de defesa. Você escolhe a que mais faz sentido.' },
+                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado em Markdown pronto para imprimir ou enviar ao DETRAN.' }
+                ].map((s, i) => (
+                  <div key={i} className="relative bg-gradient-to-br from-slate-50 to-white p-6 rounded-2xl border border-slate-100 hover:shadow-lg transition-shadow group">
+                    <div className="absolute -top-3 -left-3 w-8 h-8 bg-blue-600 text-white rounded-xl flex items-center justify-center font-black text-sm shadow-lg">
+                      {s.num}
+                    </div>
+                    <div className="flex items-center justify-center w-16 h-16 bg-blue-50 rounded-2xl mb-4 text-blue-600 group-hover:bg-blue-100 transition-colors">
+                      {s.icon}
+                    </div>
+                    <h4 className="font-black text-slate-900 text-lg mb-2">{s.title}</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed">{s.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Value Props */}
+              <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 md:p-8 mb-10">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  {[
+                    { val: '15 seg', label: 'Análise da Multa' },
+                    { val: '+1.2k', label: 'Recursos Gerados' },
+                    { val: '90%', label: 'Precisão Jurídica' },
+                    { val: '24/7', label: 'Disponibilidade' }
+                  ].map((m, i) => (
+                    <div key={i}>
+                      <p className="text-2xl md:text-3xl font-black text-white">{m.val}</p>
+                      <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">{m.label}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <label className="inline-flex items-center justify-center gap-3 px-10 py-6 bg-blue-600 text-white rounded-2xl font-black text-xl shadow-2xl hover:bg-blue-700 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full md:w-auto">
+              {/* CTA Button */}
+              <label className="relative inline-flex items-center justify-center gap-3 px-10 py-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-2xl font-black text-xl shadow-2xl hover:from-blue-700 hover:to-blue-800 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full group overflow-hidden">
+                <span className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></span>
                 <Upload className="w-6 h-6" />
-                COMEÇAR AGORA
+                ENVIAR FOTO DA MULTA
                 <input type='file' className="hidden" accept="image/*" onChange={handleFileUpload} />
               </label>
-              <p className="mt-6 text-slate-400 text-sm font-medium flex items-center justify-center gap-2">
-                <Lock className="w-4 h-4" /> Seus dados estão protegidos e criptografados.
-              </p>
+
+              {/* Trust Badges */}
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-bold uppercase tracking-widest">
+                <span className="flex items-center gap-2"><Lock className="w-4 h-4 text-green-500" /> Dados Criptografados</span>
+                <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-green-500" /> LGPD Compliant</span>
+
+              </div>
             </div>
           )}
 
@@ -709,7 +777,7 @@ const App: React.FC = () => {
                               amount: 0,
                               isFree: true
                             });
-                            incrementFreeUsage();
+                            // Uso grátis é controlado no servidor
                             await handleGenerateDocument();
                           } catch (err: any) {
                             setError(err.message || "Erro ao gerar recurso grátis");
@@ -827,7 +895,7 @@ const App: React.FC = () => {
       </main >
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
-        <p className="mb-4">© 2025 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
+        <p className="mb-4">© 2026 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
       </footer>
 
@@ -884,7 +952,18 @@ const App: React.FC = () => {
           .document-sheet { padding: 40px 20px; }
         }
       `}</style>
-    </div >
+
+      {/* Footer */}
+      <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
+        <p>© 2026 AutoRecurso. Todos os direitos reservados.</p>
+        <button
+          onClick={() => setShowPrivacy(true)}
+          className="mt-2 underline hover:text-blue-600 transition-colors"
+        >
+          Política de Privacidade
+        </button>
+      </footer>
+    </div>
   );
 };
 

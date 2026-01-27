@@ -6,9 +6,13 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
     server: {
-      port: 3000,
+      port: 5173,
       host: '0.0.0.0',
       proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
+        },
         '/api-abacate': {
           target: 'https://api.abacatepay.com',
           changeOrigin: true,
@@ -18,10 +22,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react()],
     define: {
-      'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.ABACATE_PAY_API_KEY': JSON.stringify(env.VITE_ABACATE_PAY_API_KEY),
-      'process.env.DEEPSEEK_API_KEY': JSON.stringify(env.VITE_DEEPSEEK_API_KEY)
+      'process.env.BUILD_TIME': JSON.stringify(new Date().toISOString())
     },
     resolve: {
       alias: {

@@ -44,3 +44,37 @@ export enum AppStep {
   GENERATING = 'GENERATING',
   FINAL_DOCUMENT = 'FINAL_DOCUMENT'
 }
+
+export interface AdminSettings {
+  isFreeGenerationEnabled: boolean;
+  freeGenerationLimit: number;
+  freeGenerationsUsed: number;
+}
+
+export interface AnalyticsEvent {
+  id: string;
+  timestamp: number;
+  type: 'payment_started' | 'payment_completed' | 'payment_failed' | 'resource_generated' | 'generation_error' | 'form_abandoned' | 'email_failed' | 'email_sent';
+  data: any;
+}
+
+export interface CustomerRecord {
+  id: string;
+  name: string;
+  email: string;
+  cpf: string;
+  phone: string;
+  lastActivity: number;
+  totalResources: number;
+  totalPaid: number;
+}
+
+export interface ResourceRecord {
+  id: string;
+  customerName: string;
+  customerEmail: string;
+  ticketPlate: string;
+  ticketArticle: string;
+  generatedAt: number;
+  documentContent?: string;
+}
