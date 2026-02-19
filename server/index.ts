@@ -6,6 +6,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import jwt from 'jsonwebtoken';
+import { Request, Response, NextFunction } from 'express';
 
 dotenv.config();
 const port = process.env.PORT || 3001;
@@ -13,6 +15,8 @@ console.log('--- Server Start Configuration ---');
 console.log('PORT:', port);
 console.log('GEMINI_API_KEY loaded:', !!process.env.GEMINI_API_KEY);
 console.log('ABACATE_PAY_API_KEY loaded:', !!process.env.ABACATE_PAY_API_KEY);
+console.log('JWT_SECRET loaded:', !!process.env.JWT_SECRET);
+console.log('ADMIN_PASSWORD loaded:', !!process.env.ADMIN_PASSWORD);
 console.log('---------------------------------');
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +26,12 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Logging Middleware
+app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.originalUrl}`);
+    next();
+});
 
 // --- Simple Data Store ---
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -48,18 +58,46 @@ const saveData = (data: any) => {
 // --- Gemini Configuration ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const MODEL_NAME = 'gemini-2.0-flash';
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_change_me_in_production';
+
+// --- Auth Middleware ---
+const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Malformed token' });
+    }
+
+    try {
+        jwt.verify(token, JWT_SECRET);
+        next();
+    } catch (error) {
+        return res.status(403).json({ success: false, message: 'Invalid or expired token' });
+    }
+};
 
 // --- Routes ---
 
-app.post('/api/generate/analyze', async (req, res) => {
+app.post('/auto-api/generate/analyze', async (req, res) => {
     console.log('📥 [Analyze] Request received');
     try {
-        const { base64Image } = req.body;
-        console.log('📷 [Analyze] Image size:', base64Image?.length, 'chars');
+        let { base64Image } = req.body;
+        console.log('📷 [Analyze] Received image data length:', base64Image?.length);
+
+        // Remove data URL prefix if present
+        if (base64Image && base64Image.includes('base64,')) {
+            console.log('✂️ [Analyze] Removing base64 prefix...');
+            base64Image = base64Image.split('base64,')[1];
+        }
 
         const model = genAI.getGenerativeModel({
             model: MODEL_NAME,
             generationConfig: {
+                // ... existing config ...
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: SchemaType.OBJECT,
@@ -96,7 +134,7 @@ app.post('/api/generate/analyze', async (req, res) => {
             }
         });
 
-        console.log('🤖 [Analyze] Calling Gemini API...');
+        console.log('🤖 [Analyze] Calling Gemini API with cleaned image...');
         const result = await model.generateContent([
             { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
             { text: "Analise esta foto de uma multa de trânsito brasileira. Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis. IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (\"\"). NUNCA retorne textos como \"Não visível\", \"N/A\" ou similares. Retorne os dados estritamente no formato JSON conforme o schema especificado." }
@@ -107,13 +145,20 @@ app.post('/api/generate/analyze', async (req, res) => {
         res.json(JSON.parse(response.text()));
     } catch (error: any) {
         console.error('❌ [Analyze] Error:', error);
-        res.status(500).json({ error: error.message });
+        if (error.cause) console.error('❌ [Analyze] Cause:', error.cause);
+        res.status(500).json({ error: error.message, details: error.toString() });
     }
 });
 
-app.post('/api/generate/analyze-cnh', async (req, res) => {
+app.post('/auto-api/generate/analyze-cnh', async (req, res) => {
     try {
-        const { base64Image } = req.body;
+        let { base64Image } = req.body;
+
+        // Remove data URL prefix if present
+        if (base64Image && base64Image.includes('base64,')) {
+            base64Image = base64Image.split('base64,')[1];
+        }
+
         const model = genAI.getGenerativeModel({
             model: MODEL_NAME,
             generationConfig: {
@@ -139,11 +184,12 @@ app.post('/api/generate/analyze-cnh', async (req, res) => {
         const response = await result.response;
         res.json(JSON.parse(response.text()));
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error('❌ [Analyze CNH] Error:', error);
+        res.status(500).json({ error: error.message, details: error.toString() });
     }
 });
 
-app.post('/api/generate/appeal', async (req, res) => {
+app.post('/auto-api/generate/appeal', async (req, res) => {
     try {
         const { ticketInfo, selectedStrategyId, userReason, personalData, city, dateString } = req.body;
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
@@ -162,7 +208,7 @@ app.post('/api/generate/appeal', async (req, res) => {
     }
 });
 
-app.post('/api/payment/create', async (req, res) => {
+app.post('/auto-api/payment/create', async (req, res) => {
     try {
         const response = await fetch('https://api.abacatepay.com/v1/billing/create', {
             method: 'POST',
@@ -179,7 +225,7 @@ app.post('/api/payment/create', async (req, res) => {
     }
 });
 
-app.get('/api/payment/status/:id', async (req, res) => {
+app.get('/auto-api/payment/status/:id', async (req, res) => {
     try {
         const response = await fetch('https://api.abacatepay.com/v1/billing/list', {
             headers: { 'Authorization': `Bearer ${process.env.ABACATE_PAY_API_KEY}` }
@@ -192,20 +238,34 @@ app.get('/api/payment/status/:id', async (req, res) => {
     }
 });
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/auto-api/admin/login', (req, res) => {
     const { password } = req.body;
     if (password === process.env.ADMIN_PASSWORD) {
-        res.json({ success: true, token: 'fake-jwt-token' });
+        const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+        res.json({ success: true, token });
     } else {
         res.status(401).json({ success: false, message: 'Senha incorreta' });
     }
 });
 
-app.get('/api/admin/data', (req, res) => {
+app.get('/auto-api/admin/data', authMiddleware, (req, res) => {
     res.json(loadData());
 });
 
-app.post('/api/analytics/event', (req, res) => {
+app.post('/auto-api/admin/settings', authMiddleware, (req, res) => {
+    const data = loadData();
+    data.settings = { ...data.settings, ...req.body };
+    saveData(data);
+    res.json(data.settings);
+});
+
+app.post('/auto-api/admin/clear', authMiddleware, (req, res) => {
+    const data = { events: [], customers: [], resources: [], abandonedCarts: [], settings: loadData().settings };
+    saveData(data);
+    res.json({ success: true });
+});
+
+app.post('/auto-api/analytics/event', (req, res) => {
     const data = loadData();
     const event = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -217,7 +277,7 @@ app.post('/api/analytics/event', (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/admin/register-resource', (req, res) => {
+app.post('/auto-api/admin/register-resource', (req, res) => {
     const data = loadData();
     const resource = {
         id: `res-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -229,7 +289,7 @@ app.post('/api/admin/register-resource', (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/email/send', async (req, res) => {
+app.post('/auto-api/email/send', async (req, res) => {
     try {
         const response = await fetch('https://api.brevo.com/v3/smtp/email', {
             method: 'POST',
@@ -249,7 +309,7 @@ app.post('/api/email/send', async (req, res) => {
 });
 
 // PDF Generation and Email with Attachment
-app.post('/api/email/send-pdf', async (req, res) => {
+app.post('/auto-api/email/send-pdf', async (req, res) => {
     console.log('📨 [PDF Email] Request received');
     try {
         const { to, name, documentContent, subject } = req.body;
@@ -345,6 +405,11 @@ app.post('/api/email/send-pdf', async (req, res) => {
         console.error('❌ [PDF Email] Error:', error);
         res.status(500).json({ error: error.message });
     }
+});
+
+app.use((req, res) => {
+    console.log(`[404] Route not found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: "Route not found", path: req.originalUrl });
 });
 
 app.listen(port, () => {

@@ -20,6 +20,7 @@ cleanup() {
 trap cleanup SIGINT
 
 # Iniciar Backend
+export NODE_OPTIONS='--dns-result-order=ipv4first'
 echo "📡 Iniciando Backend (Porta 3001)..."
 (cd server && npm run dev) &
 

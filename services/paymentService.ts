@@ -1,5 +1,5 @@
 export const createAbacatePayBilling = async (fullName: string, email: string, cpfOrCnpj: string, cellphone: string): Promise<{ url: string, id: string }> => {
-    const response = await fetch("/api/payment/create", {
+    const response = await fetch("/auto-api/payment/create", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
@@ -33,7 +33,7 @@ export const createAbacatePayBilling = async (fullName: string, email: string, c
 };
 
 export const checkAbacatePayBillingStatus = async (billingId: string): Promise<string> => {
-    const response = await fetch(`/api/payment/status/${billingId}`);
+    const response = await fetch(`/auto-api/payment/status/${billingId}`);
     const result = await response.json();
     return result.status;
 };

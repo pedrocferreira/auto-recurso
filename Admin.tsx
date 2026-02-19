@@ -30,17 +30,42 @@ const Admin: React.FC = () => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [password, setPassword] = useState('');
     const [activeTab, setActiveTab] = useState<TabType>('overview');
-    const [stats, setStats] = useState<any>({});
+    const [stats, setStats] = useState<any>({
+        totalResources: 0,
+        resources24h: 0,
+        totalRevenue: 0,
+        payments24h: 0,
+        totalErrors: 0,
+        successRate: '0',
+        freeGenerationLimit: 0,
+        freeGenerationsUsed: 0
+    });
+
+
+    // State for dashboard data
     const [events, setEvents] = useState<AnalyticsEvent[]>([]);
     const [customers, setCustomers] = useState<CustomerRecord[]>([]);
     const [resources, setResources] = useState<ResourceRecord[]>([]);
     const [abandonedCarts, setAbandonedCarts] = useState<any[]>([]);
-    const [filterType, setFilterType] = useState<string>('all');
-    const [showClearConfirm, setShowClearConfirm] = useState(false);
-    const [selectedResource, setSelectedResource] = useState<ResourceRecord | null>(null);
-    const [sendingEmail, setSendingEmail] = useState<string | null>(null);
+    const [adminSettings, setAdminSettings] = useState<AdminSettings>({
+        isFreeGenerationEnabled: false,
+        freeGenerationLimit: 0,
+        freeGenerationsUsed: 0
+    });
+
+    // UI state
     const [emailStatus, setEmailStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-    const [adminSettings, setAdminSettings] = useState<AdminSettings | any>({});
+    const [sendingEmail, setSendingEmail] = useState<string | null>(null);
+    const [selectedResource, setSelectedResource] = useState<ResourceRecord | null>(null);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [filterType, setFilterType] = useState('all');
+
+    useEffect(() => {
+        const token = localStorage.getItem('adminToken');
+        if (token) {
+            setIsAuthenticated(true);
+        }
+    }, []);
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -57,7 +82,7 @@ const Admin: React.FC = () => {
             setAbandonedCarts(data.abandonedCarts);
             setAdminSettings(data.settings);
 
-            // Calculate basic stats manually if needed, or get from data
+            // Calculate basic stats manually
             const last24h = Date.now() - (24 * 60 * 60 * 1000);
             setStats({
                 totalResources: data.resources.length,
@@ -65,23 +90,30 @@ const Admin: React.FC = () => {
                 totalRevenue: data.events.filter((e: any) => e.type === 'payment_completed').reduce((sum: number, e: any) => sum + (e.data.amount || 24.9), 0),
                 payments24h: data.events.filter((e: any) => e.type === 'payment_completed' && e.timestamp >= last24h).length,
                 totalErrors: data.events.filter((e: any) => e.type === 'generation_error').length,
-                successRate: data.resources.length > 0 ? ((data.resources.length / data.events.filter((e: any) => e.type === 'payment_completed').length || 1) * 100).toFixed(1) : '0'
+                successRate: data.resources.length > 0 ? ((data.resources.length / data.events.filter((e: any) => e.type === 'payment_completed').length || 1) * 100).toFixed(1) : '0',
+                freeGenerationLimit: data.settings.freeGenerationLimit,
+                freeGenerationsUsed: data.settings.freeGenerationsUsed
             });
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to load admin data:', err);
+            if (err.message === 'Unauthorized' || err.message.includes('401') || err.message.includes('403')) {
+                localStorage.removeItem('adminToken');
+                setIsAuthenticated(false);
+            }
         }
     };
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const response = await fetch('/api/admin/login', {
+            const response = await fetch('/auto-api/admin/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password })
             });
             const result = await response.json();
             if (result.success) {
+                localStorage.setItem('adminToken', result.token);
                 setIsAuthenticated(true);
                 setPassword('');
             } else {
@@ -135,7 +167,7 @@ const Admin: React.FC = () => {
             console.log('✅ Email resent successfully to:', event.data.customerEmail);
 
             // Log success event
-            const { logEvent } = await import('./services/analyticsService');
+            // Log success event
             logEvent('email_sent', {
                 customerEmail: event.data.customerEmail,
                 customerName: event.data.customerName,
@@ -256,7 +288,10 @@ const Admin: React.FC = () => {
                         <button onClick={loadData} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Atualizar">
                             <RefreshCw className="w-5 h-5 text-slate-600" />
                         </button>
-                        <button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        <button onClick={() => {
+                            localStorage.removeItem('adminToken');
+                            setIsAuthenticated(false);
+                        }} className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
                             <LogOut className="w-4 h-4" />
                             <span className="font-bold text-sm">Sair</span>
                         </button>

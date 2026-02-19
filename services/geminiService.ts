@@ -1,22 +1,28 @@
 import { TicketInfo, PersonalInfo } from "../types";
 
 export const analyzeTicketImage = async (base64Image: string): Promise<TicketInfo> => {
-  const response = await fetch('/api/generate/analyze', {
+  const response = await fetch('/auto-api/generate/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64Image })
   });
-  if (!response.ok) throw new Error("Erro ao analisar imagem no servidor.");
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Erro ao analisar imagem no servidor.");
+  }
   return await response.json();
 };
 
 export const analyzeCNHImage = async (base64Image: string): Promise<Partial<PersonalInfo>> => {
-  const response = await fetch('/api/generate/analyze-cnh', {
+  const response = await fetch('/auto-api/generate/analyze-cnh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64Image })
   });
-  if (!response.ok) throw new Error("Erro ao analisar CNH no servidor.");
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Erro ao analisar CNH no servidor.");
+  }
   return await response.json();
 };
 
@@ -28,7 +34,7 @@ export const generateFinalAppeal = async (
   city: string,
   dateString: string
 ): Promise<string> => {
-  const response = await fetch('/api/generate/appeal', {
+  const response = await fetch('/auto-api/generate/appeal', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -40,7 +46,10 @@ export const generateFinalAppeal = async (
       dateString
     })
   });
-  if (!response.ok) throw new Error("Erro ao gerar recurso no servidor.");
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Erro ao gerar recurso no servidor.");
+  }
   const data = await response.json();
   return data.appeal;
 };

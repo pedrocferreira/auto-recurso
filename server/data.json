@@ -19,7 +19,7 @@
   "resources": [],
   "abandonedCarts": [],
   "settings": {
-    "isFreeGenerationEnabled": false,
+    "isFreeGenerationEnabled": true,
     "freeGenerationLimit": 10,
     "freeGenerationsUsed": 0
   }

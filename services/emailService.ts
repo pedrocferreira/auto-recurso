@@ -6,7 +6,7 @@ export interface EmailOptions {
 }
 
 export const sendEmail = async (options: EmailOptions): Promise<boolean> => {
-  const response = await fetch('/api/email/send', {
+  const response = await fetch('/auto-api/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -54,7 +54,7 @@ export const sendPdfEmail = async (
   documentContent: string,
   subject?: string
 ): Promise<boolean> => {
-  const response = await fetch('/api/email/send-pdf', {
+  const response = await fetch('/auto-api/email/send-pdf', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

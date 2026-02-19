@@ -9,7 +9,7 @@ export interface AnalyticsEvent {
 
 export const logEvent = async (type: string, data: any = {}) => {
     try {
-        await fetch('/api/analytics/event', {
+        await fetch('/auto-api/analytics/event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type, data })
@@ -21,7 +21,7 @@ export const logEvent = async (type: string, data: any = {}) => {
 
 export const registerResource = async (data: any) => {
     try {
-        await fetch('/api/admin/register-resource', {
+        await fetch('/auto-api/admin/register-resource', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -31,20 +31,34 @@ export const registerResource = async (data: any) => {
     }
 };
 
+const getAuthHeaders = () => {
+    const token = localStorage.getItem('adminToken');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 export const getAdminData = async () => {
-    const response = await fetch('/api/admin/data');
+    const response = await fetch('/auto-api/admin/data', {
+        headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error('Unauthorized');
     return await response.json();
 };
 
 export const updateAdminSettings = async (settings: any) => {
-    const response = await fetch('/api/admin/settings', {
+    const response = await fetch('/auto-api/admin/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+        },
         body: JSON.stringify(settings)
     });
     return await response.json();
 };
 
 export const clearAllData = async () => {
-    await fetch('/api/admin/clear', { method: 'POST' });
+    await fetch('/auto-api/admin/clear', {
+        method: 'POST',
+        headers: getAuthHeaders()
+    });
 };
