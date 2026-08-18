@@ -12,11 +12,6 @@ export default defineConfig(({ mode }) => {
         '/auto-api': {
           target: 'http://localhost:3001',
           changeOrigin: true
-        },
-        '/api-abacate': {
-          target: 'https://api.abacatepay.com',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api-abacate/, '')
         }
       }
     },

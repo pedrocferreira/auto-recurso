@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
-import { createAbacatePayBilling, checkAbacatePayBillingStatus } from './services/paymentService';
+import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
 import { logEvent, registerResource, getAdminData } from './services/analyticsService';
 import { sendResourceEmail, sendPdfEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
@@ -146,22 +146,22 @@ const App: React.FC = () => {
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('success') === 'true') {
         const savedStep = localStorage.getItem('appStep');
-        const billingId = localStorage.getItem('billingId');
+        const paymentEmail = localStorage.getItem('paymentEmail');
 
-        if (savedStep === AppStep.PAYMENT && billingId) {
+        if (savedStep === AppStep.PAYMENT && paymentEmail) {
           try {
-            const status = await checkAbacatePayBillingStatus(billingId);
-            if (status === 'PAID' || status === 'CONFIRMED') {
-              logEvent('payment_completed', { billingId, amount: 24.90 });
+            const status = await checkKiwifyPaymentStatus(paymentEmail);
+            if (status === 'PAID') {
+              logEvent('payment_completed', { email: paymentEmail, amount: 24.90 });
               handleGenerateDocument();
             } else {
-              logEvent('payment_failed', { billingId, errorMessage: `Status: ${status}` });
-              setError(`O pagamento ainda não foi confirmado (Status: ${status}).`);
+              logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${status}` });
+              setError(`O pagamento ainda não foi confirmado (Status: ${status}). Tente novamente em alguns instantes.`);
               setStep(AppStep.USER_DATA);
             }
           } catch (err) {
             console.error("Erro ao verificar pagamento:", err);
-            logEvent('payment_failed', { billingId, errorMessage: String(err) });
+            logEvent('payment_failed', { email: paymentEmail, errorMessage: String(err) });
             // Em caso de erro na API de verificação, voltamos para a tela de dados
             setError("Não conseguimos confirmar seu pagamento automaticamente. Por favor, tente novamente.");
             setStep(AppStep.USER_DATA);
@@ -415,9 +415,6 @@ const App: React.FC = () => {
             <Scale className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tighter">AUTO <span className="text-blue-600">RECURSO</span></h1>
-          {import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') && (
-            <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-black rounded border border-amber-200">DEV MODE</span>
-          )}
         </div>
         <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
           <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
@@ -808,13 +805,7 @@ const App: React.FC = () => {
                               amount: 24.90
                             });
 
-                            const { url, id } = await createAbacatePayBilling(
-                              personalData.fullName,
-                              personalData.email,
-                              personalData.cpf,
-                              personalData.phone
-                            );
-                            localStorage.setItem('billingId', id);
+                            const { url } = await redirectToKiwifyCheckout(personalData);
                             window.location.href = url;
                           } catch (err: any) {
                             logEvent('payment_failed', {
@@ -827,8 +818,7 @@ const App: React.FC = () => {
                         }}
                         className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                       >
-                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> :
-                          (import.meta.env.VITE_ABACATE_PAY_API_KEY?.startsWith('abc_dev_') ? "PAGAR AGORA (MODO DEV)" : "PAGAR VIA PIX")}
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PAGAR AGORA"}
                       </button>
                     )}
 
@@ -855,7 +845,7 @@ const App: React.FC = () => {
                   <ShieldCheck className="w-4 h-4" /> Pagamento Seguro
                 </div>
                 <div className="font-black text-slate-400 text-[10px] tracking-widest uppercase">
-                  AbacatePay
+                  Kiwify
                 </div>
               </div>
             </div>

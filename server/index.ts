@@ -14,10 +14,38 @@ const port = process.env.PORT || 3001;
 console.log('--- Server Start Configuration ---');
 console.log('PORT:', port);
 console.log('GEMINI_API_KEY loaded:', !!process.env.GEMINI_API_KEY);
-console.log('ABACATE_PAY_API_KEY loaded:', !!process.env.ABACATE_PAY_API_KEY);
+console.log('KIWIFY_CLIENT_ID loaded:', !!process.env.KIWIFY_CLIENT_ID);
+console.log('KIWIFY_CLIENT_SECRET loaded:', !!process.env.KIWIFY_CLIENT_SECRET);
+console.log('KIWIFY_ACCOUNT_ID loaded:', !!process.env.KIWIFY_ACCOUNT_ID);
 console.log('JWT_SECRET loaded:', !!process.env.JWT_SECRET);
 console.log('ADMIN_PASSWORD loaded:', !!process.env.ADMIN_PASSWORD);
 console.log('---------------------------------');
+
+// --- Kiwify OAuth Token Cache ---
+let kiwifyTokenCache: { token: string; expiresAt: number } | null = null;
+
+async function getKiwifyToken(): Promise<string> {
+    if (kiwifyTokenCache && Date.now() < kiwifyTokenCache.expiresAt) {
+        return kiwifyTokenCache.token;
+    }
+    console.log('🔑 [Kiwify] Requesting new OAuth token...');
+    const response = await fetch('https://public-api.kiwify.com/v1/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `client_id=${encodeURIComponent(process.env.KIWIFY_CLIENT_ID || '')}&client_secret=${encodeURIComponent(process.env.KIWIFY_CLIENT_SECRET || '')}`
+    });
+    if (!response.ok) {
+        const errText = await response.text();
+        console.error('❌ [Kiwify] OAuth token error:', errText);
+        throw new Error(`Kiwify OAuth error: ${response.status}`);
+    }
+    const data: any = await response.json();
+    const token = data.access_token;
+    // Token expires in 96h, refresh 1h early
+    kiwifyTokenCache = { token, expiresAt: Date.now() + (95 * 60 * 60 * 1000) };
+    console.log('✅ [Kiwify] OAuth token obtained successfully');
+    return token;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,7 +85,7 @@ const saveData = (data: any) => {
 
 // --- Gemini Configuration ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const MODEL_NAME = 'gemini-2.0-flash';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_change_me_in_production';
 
 // --- Auth Middleware ---
@@ -210,30 +238,56 @@ app.post('/auto-api/generate/appeal', async (req, res) => {
 
 app.post('/auto-api/payment/create', async (req, res) => {
     try {
-        const response = await fetch('https://api.abacatepay.com/v1/billing/create', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.ABACATE_PAY_API_KEY}`
-            },
-            body: JSON.stringify(req.body)
-        });
-        const data = await response.json();
-        res.json(data);
+        const { email } = req.body;
+        const checkoutUrl = `https://pay.kiwify.com.br/YtpRqSE`;
+        // Return checkout URL - the frontend will redirect to Kiwify
+        res.json({ url: checkoutUrl, provider: 'kiwify' });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/auto-api/payment/status/:id', async (req, res) => {
+app.get('/auto-api/payment/verify/:email', async (req, res) => {
     try {
-        const response = await fetch('https://api.abacatepay.com/v1/billing/list', {
-            headers: { 'Authorization': `Bearer ${process.env.ABACATE_PAY_API_KEY}` }
+        const email = decodeURIComponent(req.params.email);
+        console.log(`🔍 [Kiwify] Verifying payment for email: ${email}`);
+        const token = await getKiwifyToken();
+        const accountId = process.env.KIWIFY_ACCOUNT_ID || '';
+
+        // Search sales by customer email
+        const salesUrl = `https://public-api.kiwify.com/v1/sales?customer_email=${encodeURIComponent(email)}`;
+        const response = await fetch(salesUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'x-kiwify-account-id': accountId
+            }
         });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error('❌ [Kiwify] Sales API error:', errText);
+            return res.json({ status: 'ERROR', message: 'Failed to verify payment' });
+        }
+
         const result: any = await response.json();
-        const billing = result.data.find((b: any) => b.id === req.params.id);
-        res.json({ status: billing ? billing.status : "NOT_FOUND" });
+        const sales = result.data || [];
+
+        // Check if any sale is paid/approved (most recent first)
+        const paidSale = sales.find((sale: any) =>
+            sale.status === 'paid' ||
+            sale.status === 'approved' ||
+            sale.status === 'completed'
+        );
+
+        if (paidSale) {
+            console.log(`✅ [Kiwify] Payment confirmed for ${email}, sale ID: ${paidSale.id}`);
+            res.json({ status: 'PAID', saleId: paidSale.id });
+        } else {
+            console.log(`⏳ [Kiwify] No confirmed payment found for ${email}`);
+            res.json({ status: 'PENDING' });
+        }
     } catch (error: any) {
+        console.error('❌ [Kiwify] Verification error:', error.message);
         res.status(500).json({ error: error.message });
     }
 });

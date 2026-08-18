@@ -1,39 +1,28 @@
-export const createAbacatePayBilling = async (fullName: string, email: string, cpfOrCnpj: string, cellphone: string): Promise<{ url: string, id: string }> => {
-    const response = await fetch("/auto-api/payment/create", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            frequency: "ONE_TIME",
-            methods: ["PIX"],
-            products: [
-                {
-                    externalId: "recurso-multa-ai",
-                    name: "Recurso de Multa Inteligente",
-                    description: "Análise e geração de recurso de multa via IA",
-                    quantity: 1,
-                    price: 2490
-                }
-            ],
-            customer: {
-                name: fullName,
-                email: email,
-                taxId: cpfOrCnpj.replace(/\D/g, ''),
-                cellphone: cellphone.replace(/\D/g, '')
-            },
-            returnUrl: window.location.origin,
-            completionUrl: window.location.origin + "/?success=true"
-        })
-    });
+import { PersonalInfo } from "../types";
 
-    const result = await response.json();
-    if (result.error) throw new Error(result.error.message || "Erro ao criar cobrança.");
-    return { url: result.data.url, id: result.data.id };
+const KIWIFY_CHECKOUT_URL = import.meta.env.VITE_KIWIFY_CHECKOUT_URL || 'https://pay.kiwify.com.br/YtpRqSE';
+
+export const redirectToKiwifyCheckout = async (personalData: PersonalInfo): Promise<{ url: string }> => {
+    // Save email to localStorage so we can verify payment when user returns
+    localStorage.setItem('paymentEmail', personalData.email);
+
+    // Build Kiwify checkout URL with pre-filled email
+    const checkoutUrl = new URL(KIWIFY_CHECKOUT_URL);
+    if (personalData.email) {
+        checkoutUrl.searchParams.set('email', personalData.email);
+    }
+    if (personalData.fullName) {
+        checkoutUrl.searchParams.set('name', personalData.fullName);
+    }
+
+    return { url: checkoutUrl.toString() };
 };
 
-export const checkAbacatePayBillingStatus = async (billingId: string): Promise<string> => {
-    const response = await fetch(`/auto-api/payment/status/${billingId}`);
+export const checkKiwifyPaymentStatus = async (email: string): Promise<string> => {
+    const response = await fetch(`/auto-api/payment/verify/${encodeURIComponent(email)}`);
+    if (!response.ok) {
+        throw new Error("Erro ao verificar pagamento");
+    }
     const result = await response.json();
     return result.status;
 };

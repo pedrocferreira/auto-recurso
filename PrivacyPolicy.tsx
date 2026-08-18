@@ -43,7 +43,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                                 <li><strong>Dados de Identificação:</strong> Nome completo, CPF, RG, CNH, endereço, e-mail e telefone.</li>
                                 <li><strong>Dados do Veículo:</strong> Placa, informações do auto de infração.</li>
                                 <li><strong>Imagens:</strong> Fotos do auto de infração ou CNH enviadas para análise.</li>
-                                <li><strong>Dados de Pagamento:</strong> Processados exclusivamente pelo AbacatePay. Não armazenamos dados de cartão.</li>
+                                <li><strong>Dados de Pagamento:</strong> Processados exclusivamente pela Kiwify. Não armazenamos dados de cartão.</li>
                                 <li><strong>Dados de Uso:</strong> Logs de acesso, eventos de navegação e interações com a plataforma.</li>
                             </ul>
                         </Section>
@@ -54,7 +54,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                         >
                             <ul className="list-disc pl-5 space-y-2 text-slate-600">
                                 <li>Gerar recursos de trânsito personalizados utilizando inteligência artificial.</li>
-                                <li>Processar pagamentos de forma segura via nosso parceiro AbacatePay.</li>
+                                <li>Processar pagamentos de forma segura via nosso parceiro Kiwify.</li>
                                 <li>Enviar o documento gerado por e-mail.</li>
                                 <li>Melhorar nossos serviços e experiência do usuário.</li>
                                 <li>Cumprir obrigações legais e regulatórias.</li>
@@ -79,7 +79,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                             <p className="text-slate-600 mb-4">Compartilhamos seus dados apenas com:</p>
                             <ul className="list-disc pl-5 space-y-2 text-slate-600">
                                 <li><strong>Google Gemini:</strong> Para análise de imagens e geração de texto (IA).</li>
-                                <li><strong>AbacatePay:</strong> Para processamento de pagamentos PIX.</li>
+                                <li><strong>Kiwify:</strong> Para processamento de pagamentos.</li>
                                 <li><strong>Brevo (Sendinblue):</strong> Para envio de e-mails transacionais.</li>
                             </ul>
                         </Section>
