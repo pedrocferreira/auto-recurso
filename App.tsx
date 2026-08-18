@@ -1,7 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { analyzeTicketImage, generateFinalAppeal, analyzeCNHImage } from './services/geminiService';
+import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
+import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
+import { logEvent, registerResource, getAdminData } from './services/analyticsService';
+import { sendResourceEmail, sendPdfEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
+import PrivacyPolicy from './PrivacyPolicy';
 import {
   Camera,
   Upload,
@@ -35,12 +39,89 @@ const App: React.FC = () => {
     cpf: '',
     rg: '',
     cnh: '',
-    address: ''
+    address: '',
+    email: '',
+    phone: '',
+    isDifferentDriver: false,
+    driverFullName: '',
+    driverCpf: '',
+    driverRg: '',
+    driverCnh: '',
+    profession: '',
+    civilStatus: ''
   });
   const [finalDocument, setFinalDocument] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCnhProcessing, setIsCnhProcessing] = useState<boolean>(false);
   const [isPaying, setIsPaying] = useState<boolean>(false);
+  const [adminSettings, setAdminSettings] = useState<any>({});
+  const [showPrivacy, setShowPrivacy] = useState<boolean>(false);
+
+  const [dataLoaded, setDataLoaded] = useState<boolean>(false);
+
+  const loadInitialData = async () => {
+    const savedTicketInfo = localStorage.getItem('ticketInfo');
+    const savedSelectedStrategy = localStorage.getItem('selectedStrategy');
+    const savedUserReason = localStorage.getItem('userReason');
+    const savedPersonalData = localStorage.getItem('personalData');
+
+    if (savedTicketInfo) setTicketInfo(JSON.parse(savedTicketInfo));
+    if (savedSelectedStrategy) setSelectedStrategy(savedSelectedStrategy);
+    if (savedUserReason) setUserReason(savedUserReason);
+    if (savedPersonalData) {
+      const parsed = JSON.parse(savedPersonalData);
+      setPersonalData(prev => ({ ...prev, ...parsed }));
+    }
+
+    // Fetch admin settings from backend
+    try {
+      const data = await getAdminData();
+      setAdminSettings(data.settings);
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+
+    setDataLoaded(true);
+  };
+
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  // Salvar dados no localStorage quando mudarem
+  useEffect(() => {
+    if (ticketInfo) localStorage.setItem('ticketInfo', JSON.stringify(ticketInfo));
+  }, [ticketInfo]);
+
+  useEffect(() => {
+    if (selectedStrategy) localStorage.setItem('selectedStrategy', selectedStrategy);
+  }, [selectedStrategy]);
+
+  useEffect(() => {
+    localStorage.setItem('userReason', userReason);
+  }, [userReason]);
+
+  useEffect(() => {
+    if (dataLoaded) {
+      localStorage.setItem('personalData', JSON.stringify(personalData));
+    }
+  }, [personalData, dataLoaded]);
+
+  const validateCPF = (cpf: string) => {
+    cpf = cpf.replace(/[^\d]+/g, '');
+    if (cpf.length !== 11 || !!cpf.match(/(\d)\1{10}/)) return false;
+    let sum = 0;
+    for (let i = 1; i <= 9; i++) sum = sum + parseInt(cpf.substring(i - 1, i)) * (11 - i);
+    let rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    if (rest !== parseInt(cpf.substring(9, 10))) return false;
+    sum = 0;
+    for (let i = 1; i <= 10; i++) sum = sum + parseInt(cpf.substring(i - 1, i)) * (12 - i);
+    rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    if (rest !== parseInt(cpf.substring(10, 11))) return false;
+    return true;
+  };
 
   const cleanData = (text: string | undefined) => {
     if (!text) return '';
@@ -59,6 +140,37 @@ const App: React.FC = () => {
       }));
     }
   }, [ticketInfo]);
+
+  useEffect(() => {
+    const checkPayment = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('success') === 'true') {
+        const savedStep = localStorage.getItem('appStep');
+        const paymentEmail = localStorage.getItem('paymentEmail');
+
+        if (savedStep === AppStep.PAYMENT && paymentEmail) {
+          try {
+            const status = await checkKiwifyPaymentStatus(paymentEmail);
+            if (status === 'PAID') {
+              logEvent('payment_completed', { email: paymentEmail, amount: 24.90 });
+              handleGenerateDocument();
+            } else {
+              logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${status}` });
+              setError(`O pagamento ainda não foi confirmado (Status: ${status}). Tente novamente em alguns instantes.`);
+              setStep(AppStep.USER_DATA);
+            }
+          } catch (err) {
+            console.error("Erro ao verificar pagamento:", err);
+            logEvent('payment_failed', { email: paymentEmail, errorMessage: String(err) });
+            // Em caso de erro na API de verificação, voltamos para a tela de dados
+            setError("Não conseguimos confirmar seu pagamento automaticamente. Por favor, tente novamente.");
+            setStep(AppStep.USER_DATA);
+          }
+        }
+      }
+    };
+    checkPayment();
+  }, []);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -82,6 +194,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCNHUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setIsCnhProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const data = await analyzeCNHImage(base64);
+        setPersonalData(prev => ({
+          ...prev,
+          fullName: data.fullName || prev.fullName,
+          cpf: data.cpf || prev.cpf,
+          rg: data.rg || prev.rg,
+          cnh: data.cnh || prev.cnh,
+          address: data.address || prev.address
+        }));
+        setIsCnhProcessing(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setError("Erro ao ler CNH.");
+      setIsCnhProcessing(false);
+    }
+  };
+
   const simulatePayment = () => {
     setIsPaying(true);
     setTimeout(() => {
@@ -91,14 +229,156 @@ const App: React.FC = () => {
   };
 
   const handleGenerateDocument = async () => {
-    if (!ticketInfo || !selectedStrategy) return;
+    let currentTicketInfo = ticketInfo;
+    let currentSelectedStrategy = selectedStrategy;
+    let currentUserReason = userReason;
+    let currentPersonalData = personalData;
+
+    // Recuperar do localStorage se o estado estiver vazio (pós-redirecionamento)
+    if (!currentTicketInfo) {
+      const saved = localStorage.getItem('ticketInfo');
+      if (saved) currentTicketInfo = JSON.parse(saved);
+    }
+    if (!currentSelectedStrategy) {
+      currentSelectedStrategy = localStorage.getItem('selectedStrategy');
+    }
+    if (!currentUserReason) {
+      currentUserReason = localStorage.getItem('userReason') || '';
+    }
+
+    // Sempre tenta recuperar dados pessoais do localStorage para garantir completude
+    const savedPersonalData = localStorage.getItem('personalData');
+    if (savedPersonalData) {
+      const parsed = JSON.parse(savedPersonalData);
+      currentPersonalData = { ...currentPersonalData, ...parsed };
+    }
+
+    if (!currentTicketInfo || !currentSelectedStrategy) {
+      setError("Dados insuficientes para gerar o recurso. Por favor, comece novamente.");
+      setStep(AppStep.START);
+      return;
+    }
+
+    // Validação rigorosa dos campos
+    const isValid =
+      currentPersonalData.fullName &&
+      currentPersonalData.cpf &&
+      currentPersonalData.rg &&
+      currentPersonalData.cnh &&
+      currentPersonalData.address;
+
+    if (!isValid) {
+      setError("Por favor, preencha todos os campos obrigatórios para gerar o recurso.");
+      setStep(AppStep.USER_DATA);
+      setIsProcessing(false);
+      return;
+    }
+
     setIsProcessing(true);
     setStep(AppStep.GENERATING);
     try {
-      const doc = await generateFinalAppeal(ticketInfo, selectedStrategy, userReason, personalData);
+      // Extrair cidade do endereço (tentativa simples)
+      let city = "Cidade";
+      if (currentPersonalData.address) {
+        const parts = currentPersonalData.address.split('-');
+        if (parts.length > 1) {
+          city = parts[parts.length - 1].trim(); // Pega o último pedaço após traço (Ex: Rua X - Cidade/UF)
+        } else {
+          // Tenta pegar último pedaço após vírgula se não tiver traço
+          const commaParts = currentPersonalData.address.split(',');
+          if (commaParts.length > 1) city = commaParts[commaParts.length - 1].trim();
+        }
+      }
+
+      // Format Data
+      const today = new Date();
+      const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dateString = `${today.getDate()} de ${months[today.getMonth()]} de ${today.getFullYear()}`;
+
+      const doc = await generateFinalAppeal(
+        currentTicketInfo,
+        currentSelectedStrategy,
+        currentUserReason,
+        currentPersonalData,
+        city,
+        dateString
+      );
+
+      logEvent('resource_generated', {
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        customerCpf: currentPersonalData.cpf,
+        ticketPlate: currentTicketInfo.vehiclePlate,
+        ticketArticle: currentTicketInfo.article
+      });
+
+      // Register complete resource data
+      const strategy = currentTicketInfo.strategies.find(s => s.id === currentSelectedStrategy);
+      registerResource({
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        customerCpf: currentPersonalData.cpf,
+        customerPhone: currentPersonalData.phone,
+        customerRg: currentPersonalData.rg,
+        customerCnh: currentPersonalData.cnh,
+        customerAddress: currentPersonalData.address,
+        ticketPlate: currentTicketInfo.vehiclePlate,
+        ticketArticle: currentTicketInfo.article,
+        ticketLocation: currentTicketInfo.location,
+        ticketDate: currentTicketInfo.date,
+        strategy: strategy?.title,
+        documentContent: doc
+      });
+
+      // Send email with resource
+      try {
+        await sendResourceEmail(
+          currentPersonalData.email,
+          currentPersonalData.fullName,
+          doc,
+          currentTicketInfo.vehiclePlate
+        );
+        console.log('Email sent successfully to:', currentPersonalData.email);
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+        logEvent('email_failed', {
+          customerName: currentPersonalData.fullName,
+          customerEmail: currentPersonalData.email,
+          ticketPlate: currentTicketInfo.vehiclePlate,
+          errorMessage: emailError instanceof Error ? emailError.message : 'Erro desconhecido ao enviar email'
+        });
+        // Don't fail the entire flow if email fails
+      }
+
+      // Enviar PDF por email
+      try {
+        await sendPdfEmail(
+          currentPersonalData.email,
+          currentPersonalData.fullName,
+          doc,
+          `Seu Recurso de Trânsito - ${currentTicketInfo.vehiclePlate}`
+        );
+        console.log('PDF email sent successfully to:', currentPersonalData.email);
+      } catch (pdfEmailError) {
+        console.error('Failed to send PDF email:', pdfEmailError);
+        // Don't fail the entire flow if PDF email fails
+      }
+
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
+      // Limpar localStorage após sucesso
+      localStorage.removeItem('appStep');
+      localStorage.removeItem('ticketInfo');
+      localStorage.removeItem('selectedStrategy');
+      localStorage.removeItem('userReason');
+      localStorage.removeItem('personalData');
+      localStorage.removeItem('billingId');
     } catch (err) {
+      logEvent('generation_error', {
+        customerName: currentPersonalData.fullName,
+        customerEmail: currentPersonalData.email,
+        errorMessage: String(err)
+      });
       setError("Erro ao gerar recurso.");
       setStep(AppStep.USER_DATA);
     } finally {
@@ -106,7 +386,25 @@ const App: React.FC = () => {
     }
   };
 
-  const isFormValid = personalData.fullName && personalData.cpf && personalData.rg && personalData.cnh && personalData.address;
+  const isFormValid =
+    personalData.fullName &&
+    validateCPF(personalData.cpf) &&
+    personalData.rg &&
+    personalData.cnh &&
+    personalData.address &&
+    personalData.email &&
+    personalData.phone &&
+    (!personalData.isDifferentDriver || (
+      personalData.driverFullName &&
+      validateCPF(personalData.driverCpf || '') &&
+      personalData.driverRg &&
+      personalData.driverCnh
+    ));
+
+  // Show Privacy Policy page if requested
+  if (showPrivacy) {
+    return <PrivacyPolicy onBack={() => setShowPrivacy(false)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
@@ -116,7 +414,7 @@ const App: React.FC = () => {
           <div className="bg-blue-600 p-2 rounded-lg">
             <Scale className="w-6 h-6 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">RECORRE<span className="text-blue-600">AI</span></h1>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">AUTO <span className="text-blue-600">RECURSO</span></h1>
         </div>
         <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
           <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
@@ -129,43 +427,78 @@ const App: React.FC = () => {
         <div className="w-full h-1.5 bg-slate-200 rounded-full mb-8 overflow-hidden no-print">
           <div
             className="h-full bg-blue-600 transition-all duration-500"
-            style={{ width: `${(Object.values(AppStep).indexOf(step) + 1) * 12.5}%` }}
+            style={{ width: `${(Object.values(AppStep).indexOf(step) + 1) * 11.1}%` }}
           />
         </div>
 
         <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden ${step === AppStep.FINAL_DOCUMENT ? 'print:shadow-none print:border-none' : ''}`}>
 
           {step === AppStep.START && (
-            <div className="p-8 md:p-12 text-center animate-fadeIn">
-              <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6">
-                Tecnologia Jurídica 2024
-              </span>
-              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6 leading-tight">
-                Anule sua multa sem precisar de advogado.
-              </h2>
-              <p className="text-slate-600 text-lg mb-10 max-w-xl mx-auto leading-relaxed">
-                Nossa IA analisa o Código de Trânsito Brasileiro em tempo real para encontrar erros na sua multa e gerar o recurso perfeito.
-              </p>
+            <div className="p-8 md:p-12 animate-fadeIn">
+              {/* Hero Section */}
+              <div className="text-center mb-10">
+                <span className="inline-block px-4 py-1.5 bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6 border border-blue-200/50">
+                  ✨ Inteligência Artificial Jurídica
+                </span>
+                <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 leading-tight">
+                  Anule sua multa em <span className="text-blue-600">3 passos.</span>
+                </h2>
+                <p className="text-slate-500 text-lg max-w-xl mx-auto">
+                  Nossa IA analisa o CTB em tempo real e gera defesas com mais de 90% de precisão técnica.
+                </p>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10 text-left max-w-lg mx-auto">
-                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
-                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                  <p className="text-sm font-bold text-slate-700">Identifica erros de preenchimento automaticamente.</p>
-                </div>
-                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl">
-                  <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                  <p className="text-sm font-bold text-slate-700">Cita jurisprudência e resoluções do CONTRAN.</p>
+              {/* How To Steps */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                {[
+                  { num: '1', icon: <Camera className="w-8 h-8" />, title: 'Envie a Multa', desc: 'Fotografe o auto de infração ou a notificação. Quanto mais legível, melhor a análise.' },
+                  { num: '2', icon: <Scale className="w-8 h-8" />, title: 'Escolha a Tese', desc: 'A IA identifica falhas e sugere teses de defesa. Você escolhe a que mais faz sentido.' },
+                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado em Markdown pronto para imprimir ou enviar ao DETRAN.' }
+                ].map((s, i) => (
+                  <div key={i} className="relative bg-gradient-to-br from-slate-50 to-white p-6 rounded-2xl border border-slate-100 hover:shadow-lg transition-shadow group">
+                    <div className="absolute -top-3 -left-3 w-8 h-8 bg-blue-600 text-white rounded-xl flex items-center justify-center font-black text-sm shadow-lg">
+                      {s.num}
+                    </div>
+                    <div className="flex items-center justify-center w-16 h-16 bg-blue-50 rounded-2xl mb-4 text-blue-600 group-hover:bg-blue-100 transition-colors">
+                      {s.icon}
+                    </div>
+                    <h4 className="font-black text-slate-900 text-lg mb-2">{s.title}</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed">{s.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Value Props */}
+              <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 md:p-8 mb-10">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  {[
+                    { val: '15 seg', label: 'Análise da Multa' },
+                    { val: '+1.2k', label: 'Recursos Gerados' },
+                    { val: '90%', label: 'Precisão Jurídica' },
+                    { val: '24/7', label: 'Disponibilidade' }
+                  ].map((m, i) => (
+                    <div key={i}>
+                      <p className="text-2xl md:text-3xl font-black text-white">{m.val}</p>
+                      <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">{m.label}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <label className="inline-flex items-center justify-center gap-3 px-10 py-6 bg-blue-600 text-white rounded-2xl font-black text-xl shadow-2xl hover:bg-blue-700 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full md:w-auto">
+              {/* CTA Button */}
+              <label className="relative inline-flex items-center justify-center gap-3 px-10 py-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-2xl font-black text-xl shadow-2xl hover:from-blue-700 hover:to-blue-800 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full group overflow-hidden">
+                <span className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></span>
                 <Upload className="w-6 h-6" />
-                COMEÇAR AGORA
+                ENVIAR FOTO DA MULTA
                 <input type='file' className="hidden" accept="image/*" onChange={handleFileUpload} />
               </label>
-              <p className="mt-6 text-slate-400 text-sm font-medium flex items-center justify-center gap-2">
-                <Lock className="w-4 h-4" /> Seus dados estão protegidos e criptografados.
-              </p>
+
+              {/* Trust Badges */}
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-bold uppercase tracking-widest">
+                <span className="flex items-center gap-2"><Lock className="w-4 h-4 text-green-500" /> Dados Criptografados</span>
+                <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-green-500" /> LGPD Compliant</span>
+
+              </div>
             </div>
           )}
 
@@ -276,28 +609,248 @@ const App: React.FC = () => {
                   onChange={(e) => setPersonalData({ ...personalData, address: e.target.value })}
                   className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                 />
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="email" placeholder="E-mail" value={personalData.email}
+                    onChange={(e) => setPersonalData({ ...personalData, email: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                  <input
+                    type="tel" placeholder="Telefone" value={personalData.phone}
+                    onChange={(e) => setPersonalData({ ...personalData, phone: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <label className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={personalData.isDifferentDriver}
+                    onChange={(e) => setPersonalData({ ...personalData, isDifferentDriver: e.target.checked })}
+                    className="w-5 h-5 accent-blue-600"
+                  />
+                  <span className="text-sm font-bold text-blue-900">O condutor era outra pessoa?</span>
+                </label>
+
+                {personalData.isDifferentDriver && (
+                  <div className="space-y-4 animate-slideIn">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest pt-2">Dados do Condutor</h3>
+                    <input
+                      type="text" placeholder="Nome do Condutor" value={personalData.driverFullName}
+                      onChange={(e) => setPersonalData({ ...personalData, driverFullName: e.target.value })}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <input
+                        type="text" placeholder="CPF do Condutor" value={personalData.driverCpf}
+                        onChange={(e) => setPersonalData({ ...personalData, driverCpf: e.target.value })}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                      />
+                      <input
+                        type="text" placeholder="RG do Condutor" value={personalData.driverRg}
+                        onChange={(e) => setPersonalData({ ...personalData, driverRg: e.target.value })}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                      />
+                    </div>
+                    <input
+                      type="text" placeholder="CNH do Condutor" value={personalData.driverCnh}
+                      onChange={(e) => setPersonalData({ ...personalData, driverCnh: e.target.value })}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text" placeholder="Estado Civil" value={personalData.civilStatus}
+                    onChange={(e) => setPersonalData({ ...personalData, civilStatus: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                  <input
+                    type="text" placeholder="Profissão" value={personalData.profession}
+                    onChange={(e) => setPersonalData({ ...personalData, profession: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <div className="pt-4">
+                  <label className="flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 hover:border-blue-400 transition-all cursor-pointer">
+                    {isCnhProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ScanLine className="w-5 h-5" /> Importar dados da CNH</>}
+                    <input type="file" className="hidden" accept="image/*" onChange={handleCNHUpload} />
+                  </label>
+                </div>
               </div>
 
-              {/* TELA DE CHECKOUT SIMULADA */}
-              <div className="bg-blue-900 text-white p-6 rounded-2xl mb-8">
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <p className="text-blue-300 text-xs font-black uppercase tracking-widest">Valor do Serviço</p>
-                    <p className="text-3xl font-black">R$ 47,90</p>
+              <button
+                disabled={!isFormValid || isProcessing}
+                onClick={() => {
+                  if (!isFormValid) return;
+                  setStep(AppStep.PAYMENT);
+                  window.scrollTo(0, 0);
+                }}
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                PROSSEGUIR PARA PAGAMENTO
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+          )}
+
+          {step === AppStep.PAYMENT && (
+            <div className="p-8 md:p-12 animate-slideIn">
+              <div className="text-center mb-10">
+                <span className="inline-block px-4 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-4">
+                  Última Etapa
+                </span>
+                <h2 className="text-3xl font-black text-slate-900 mb-2">Revisão do seu Recurso</h2>
+                <p className="text-slate-500 font-medium">Confira os detalhes antes de gerar o documento oficial.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+                <div className="space-y-6">
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <FileText className="w-4 h-4" /> Resumo do Pedido
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Serviço:</span>
+                        <span className="text-slate-900 font-bold">Recurso de Multa IA</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Placa:</span>
+                        <span className="text-slate-900 font-bold">{ticketInfo?.vehiclePlate}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Estratégia:</span>
+                        <span className="text-slate-900 font-bold truncate max-w-[150px]">
+                          {ticketInfo?.strategies.find(s => s.id === selectedStrategy)?.title}
+                        </span>
+                      </div>
+                      <div className="h-px bg-slate-200 my-2" />
+                      <div className="flex justify-between items-center text-lg">
+                        <span className="text-slate-900 font-black">Total:</span>
+                        <span className="text-blue-600 font-black text-2xl">
+                          {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? "GRÁTIS" : "R$ 24,90"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <ShieldCheck className="w-12 h-12 text-blue-400 opacity-50" />
+
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3 p-4 bg-green-50 rounded-xl border border-green-100">
+                      <ShieldCheck className="w-5 h-5 text-green-600" />
+                      <span className="text-sm font-bold text-green-800 font-medium">Garantia de conformidade com o CTB</span>
+                    </div>
+                    <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                      <Zap className="w-5 h-5 text-blue-600" />
+                      <span className="text-sm font-bold text-blue-800 font-medium">Emissão instantânea após pagamento</span>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-blue-200 text-xs leading-relaxed mb-6">Pague uma única vez e tenha acesso ao recurso completo, pronto para imprimir e ganhar a causa.</p>
-                <button
-                  disabled={!isFormValid || isPaying}
-                  onClick={simulatePayment}
-                  className="w-full py-4 bg-white text-blue-900 rounded-xl font-black text-lg hover:bg-blue-50 transition-all flex items-center justify-center gap-3"
-                >
-                  {isPaying ? <Loader2 className="w-6 h-6 animate-spin" /> : <><CreditCard className="w-6 h-6" /> GERAR RECURSO AGORA</>}
-                </button>
+
+                <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-2xl flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-xl font-black mb-4 flex items-center gap-2">
+                      <Lock className="w-5 h-5 text-blue-400" /> Checkout Seguro
+                    </h3>
+                    <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                      Seu pagamento será processado de forma segura via PIX. O documento será enviado para: <br />
+                      <span className="text-white font-bold">{personalData.email}</span>
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? (
+                      <button
+                        disabled={isProcessing}
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          setError(null);
+                          try {
+                            logEvent('payment_completed', {
+                              customerName: personalData.fullName,
+                              customerEmail: personalData.email,
+                              amount: 0,
+                              isFree: true
+                            });
+                            // Uso grátis é controlado no servidor
+                            await handleGenerateDocument();
+                          } catch (err: any) {
+                            setError(err.message || "Erro ao gerar recurso grátis");
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="w-full py-5 bg-white text-slate-900 rounded-2xl font-black text-lg hover:bg-slate-100 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin text-blue-600" /> : "GERAR RECURSO GRÁTIS"}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isProcessing}
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          setError(null);
+                          try {
+                            localStorage.setItem('appStep', AppStep.PAYMENT);
+                            localStorage.setItem('personalData', JSON.stringify(personalData));
+
+                            logEvent('payment_started', {
+                              customerName: personalData.fullName,
+                              customerEmail: personalData.email,
+                              customerCpf: personalData.cpf,
+                              customerPhone: personalData.phone,
+                              ticketPlate: ticketInfo?.vehiclePlate,
+                              ticketArticle: ticketInfo?.article,
+                              amount: 24.90
+                            });
+
+                            const { url } = await redirectToKiwifyCheckout(personalData);
+                            window.location.href = url;
+                          } catch (err: any) {
+                            logEvent('payment_failed', {
+                              customerEmail: personalData.email,
+                              errorMessage: err.message || "Erro ao iniciar pagamento"
+                            });
+                            setError(err.message || "Erro ao iniciar pagamento");
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PAGAR AGORA"}
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => setStep(AppStep.USER_DATA)}
+                      className="w-full py-2 text-slate-400 font-bold text-xs hover:text-white transition-colors"
+                    >
+                      ALTERAR DADOS DE CADASTRO
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-center gap-3 mb-6">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <p className="text-sm font-bold">{error}</p>
+                </div>
+              )}
+
+              <div className="flex justify-center items-center gap-8 opacity-50 grayscale transition-all hover:grayscale-0">
+                <img src="https://img.icons8.com/color/48/000000/pix.png" alt="PIX" className="h-6" />
+                <div className="flex items-center gap-1 font-black text-slate-400 text-[10px] tracking-widest uppercase">
+                  <ShieldCheck className="w-4 h-4" /> Pagamento Seguro
+                </div>
+                <div className="font-black text-slate-400 text-[10px] tracking-widest uppercase">
+                  Kiwify
+                </div>
               </div>
             </div>
           )}
+
 
           {step === AppStep.FINAL_DOCUMENT && (
             <div className="p-8 animate-fadeIn">
@@ -329,10 +882,10 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-      </main>
+      </main >
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
-        <p className="mb-4">© 2024 RECORREAI - Inteligência Artificial para Condutores.</p>
+        <p className="mb-4">© 2026 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
       </footer>
 
@@ -389,6 +942,17 @@ const App: React.FC = () => {
           .document-sheet { padding: 40px 20px; }
         }
       `}</style>
+
+      {/* Footer */}
+      <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
+        <p>© 2026 AutoRecurso. Todos os direitos reservados.</p>
+        <button
+          onClick={() => setShowPrivacy(true)}
+          className="mt-2 underline hover:text-blue-600 transition-colors"
+        >
+          Política de Privacidade
+        </button>
+      </footer>
     </div>
   );
 };

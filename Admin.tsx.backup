@@ -1,0 +1,315 @@
+import React, { useState, useEffect } from 'react';
+import { getEvents, getStats, getAbandonedCarts, clearAllData, AnalyticsEvent, getCustomers, getResources, CustomerRecord, ResourceRecord } from './services/analyticsService';
+import {
+    TrendingUp,
+    DollarSign,
+    AlertCircle,
+    ShoppingCart,
+    Activity,
+    LogOut,
+    Trash2,
+    Filter,
+    Download,
+    RefreshCw,
+    Users,
+    FileText,
+    Eye
+} from 'lucide-react';
+
+const ADMIN_PASSWORD = 'admin123'; // In production, use proper auth
+
+type TabType = 'overview' | 'customers' | 'resources' | 'logs' | 'abandoned';
+
+const Admin: React.FC = () => {
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [password, setPassword] = useState('');
+    const [activeTab, setActiveTab] = useState<TabType>('overview');
+    const [stats, setStats] = useState(getStats());
+    const [events, setEvents] = useState<AnalyticsEvent[]>([]);
+    const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+    const [resources, setResources] = useState<ResourceRecord[]>([]);
+    const [abandonedCarts, setAbandonedCarts] = useState(getAbandonedCarts());
+    const [filterType, setFilterType] = useState<string>('all');
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            loadData();
+        }
+    }, [isAuthenticated]);
+
+    const loadData = () => {
+        setStats(getStats());
+        setEvents(getEvents().reverse()); // Most recent first
+        setAbandonedCarts(getAbandonedCarts());
+    };
+
+    const handleLogin = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (password === ADMIN_PASSWORD) {
+            setIsAuthenticated(true);
+            setPassword('');
+        } else {
+            alert('Senha incorreta');
+        }
+    };
+
+    const handleClearData = () => {
+        clearAllData();
+        loadData();
+        setShowClearConfirm(false);
+    };
+
+    const filteredEvents = filterType === 'all'
+        ? events
+        : events.filter(e => e.type === filterType);
+
+    const formatDate = (timestamp: number) => {
+        return new Date(timestamp).toLocaleString('pt-BR');
+    };
+
+    const getEventTypeLabel = (type: string) => {
+        const labels: Record<string, string> = {
+            payment_started: 'Pagamento Iniciado',
+            payment_completed: 'Pagamento Concluído',
+            payment_failed: 'Pagamento Falhou',
+            resource_generated: 'Recurso Gerado',
+            generation_error: 'Erro na Geração',
+            form_abandoned: 'Formulário Abandonado'
+        };
+        return labels[type] || type;
+    };
+
+    const getEventTypeColor = (type: string) => {
+        const colors: Record<string, string> = {
+            payment_started: 'bg-blue-100 text-blue-800',
+            payment_completed: 'bg-green-100 text-green-800',
+            payment_failed: 'bg-red-100 text-red-800',
+            resource_generated: 'bg-purple-100 text-purple-800',
+            generation_error: 'bg-red-100 text-red-800',
+            form_abandoned: 'bg-yellow-100 text-yellow-800'
+        };
+        return colors[type] || 'bg-gray-100 text-gray-800';
+    };
+
+    if (!isAuthenticated) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                    <div className="text-center mb-8">
+                        <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
+                            <Activity className="w-8 h-8 text-white" />
+                        </div>
+                        <h1 className="text-2xl font-black text-slate-900">Admin Dashboard</h1>
+                        <p className="text-slate-500 text-sm mt-2">Entre para acessar o painel</p>
+                    </div>
+                    <form onSubmit={handleLogin}>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Senha"
+                            className="w-full p-4 border-2 border-slate-200 rounded-xl font-bold mb-4 focus:border-blue-600 outline-none"
+                        />
+                        <button
+                            type="submit"
+                            className="w-full py-4 bg-blue-600 text-white rounded-xl font-black hover:bg-blue-700 transition-all"
+                        >
+                            ENTRAR
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-slate-50">
+            {/* Header */}
+            <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+                <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-blue-600 p-2 rounded-lg">
+                            <Activity className="w-6 h-6 text-white" />
+                        </div>
+                        <h1 className="text-xl font-black text-slate-900">Admin Dashboard</h1>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={loadData}
+                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Atualizar"
+                        >
+                            <RefreshCw className="w-5 h-5 text-slate-600" />
+                        </button>
+                        <button
+                            onClick={() => setIsAuthenticated(false)}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+                        >
+                            <LogOut className="w-4 h-4" />
+                            <span className="font-bold text-sm">Sair</span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main className="max-w-7xl mx-auto p-4 space-y-6">
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="bg-purple-100 p-3 rounded-xl">
+                                <TrendingUp className="w-6 h-6 text-purple-600" />
+                            </div>
+                            <span className="text-xs font-bold text-green-600">+{stats.resources24h} hoje</span>
+                        </div>
+                        <h3 className="text-3xl font-black text-slate-900 mb-1">{stats.totalResources}</h3>
+                        <p className="text-sm font-bold text-slate-500">Recursos Gerados</p>
+                    </div>
+
+                    <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="bg-green-100 p-3 rounded-xl">
+                                <DollarSign className="w-6 h-6 text-green-600" />
+                            </div>
+                            <span className="text-xs font-bold text-green-600">+{stats.payments24h} hoje</span>
+                        </div>
+                        <h3 className="text-3xl font-black text-slate-900 mb-1">R$ {stats.totalRevenue.toFixed(2)}</h3>
+                        <p className="text-sm font-bold text-slate-500">Receita Total</p>
+                    </div>
+
+                    <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="bg-yellow-100 p-3 rounded-xl">
+                                <ShoppingCart className="w-6 h-6 text-yellow-600" />
+                            </div>
+                        </div>
+                        <h3 className="text-3xl font-black text-slate-900 mb-1">{stats.totalAbandoned}</h3>
+                        <p className="text-sm font-bold text-slate-500">Carrinhos Abandonados</p>
+                    </div>
+
+                    <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="bg-red-100 p-3 rounded-xl">
+                                <AlertCircle className="w-6 h-6 text-red-600" />
+                            </div>
+                            <span className="text-xs font-bold text-slate-500">{stats.successRate}% sucesso</span>
+                        </div>
+                        <h3 className="text-3xl font-black text-slate-900 mb-1">{stats.totalErrors}</h3>
+                        <p className="text-sm font-bold text-slate-500">Erros</p>
+                    </div>
+                </div>
+
+                {/* Abandoned Carts */}
+                {abandonedCarts.length > 0 && (
+                    <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                        <h2 className="text-xl font-black text-slate-900 mb-4">Recuperação de Carrinho</h2>
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead>
+                                    <tr className="border-b border-slate-200">
+                                        <th className="text-left py-3 px-4 text-xs font-black text-slate-500 uppercase">Cliente</th>
+                                        <th className="text-left py-3 px-4 text-xs font-black text-slate-500 uppercase">Email</th>
+                                        <th className="text-left py-3 px-4 text-xs font-black text-slate-500 uppercase">Telefone</th>
+                                        <th className="text-left py-3 px-4 text-xs font-black text-slate-500 uppercase">Placa</th>
+                                        <th className="text-left py-3 px-4 text-xs font-black text-slate-500 uppercase">Data</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {abandonedCarts.map((cart, idx) => (
+                                        <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                            <td className="py-3 px-4 font-bold text-sm">{cart.name || 'N/A'}</td>
+                                            <td className="py-3 px-4 text-sm">{cart.email}</td>
+                                            <td className="py-3 px-4 text-sm">{cart.phone || 'N/A'}</td>
+                                            <td className="py-3 px-4 text-sm">{cart.ticketPlate || 'N/A'}</td>
+                                            <td className="py-3 px-4 text-sm text-slate-500">{formatDate(cart.timestamp)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                {/* Event Log */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-xl font-black text-slate-900">Log de Eventos</h2>
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={filterType}
+                                onChange={(e) => setFilterType(e.target.value)}
+                                className="px-4 py-2 border border-slate-200 rounded-lg font-bold text-sm"
+                            >
+                                <option value="all">Todos</option>
+                                <option value="payment_started">Pagamento Iniciado</option>
+                                <option value="payment_completed">Pagamento Concluído</option>
+                                <option value="resource_generated">Recurso Gerado</option>
+                                <option value="generation_error">Erros</option>
+                                <option value="form_abandoned">Abandonos</option>
+                            </select>
+                            <button
+                                onClick={() => setShowClearConfirm(true)}
+                                className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Limpar Dados"
+                            >
+                                <Trash2 className="w-5 h-5 text-red-600" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {filteredEvents.length === 0 ? (
+                            <p className="text-center text-slate-400 py-8">Nenhum evento registrado</p>
+                        ) : (
+                            filteredEvents.map((event) => (
+                                <div key={event.id} className="border border-slate-100 rounded-xl p-4 hover:bg-slate-50">
+                                    <div className="flex items-start justify-between mb-2">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-black ${getEventTypeColor(event.type)}`}>
+                                            {getEventTypeLabel(event.type)}
+                                        </span>
+                                        <span className="text-xs text-slate-400">{formatDate(event.timestamp)}</span>
+                                    </div>
+                                    {Object.keys(event.data).length > 0 && (
+                                        <div className="text-sm space-y-1 mt-2">
+                                            {event.data.customerName && <p><span className="font-bold">Cliente:</span> {event.data.customerName}</p>}
+                                            {event.data.customerEmail && <p><span className="font-bold">Email:</span> {event.data.customerEmail}</p>}
+                                            {event.data.ticketPlate && <p><span className="font-bold">Placa:</span> {event.data.ticketPlate}</p>}
+                                            {event.data.errorMessage && <p className="text-red-600"><span className="font-bold">Erro:</span> {event.data.errorMessage}</p>}
+                                        </div>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </main>
+
+            {/* Clear Confirmation Modal */}
+            {showClearConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+                        <h3 className="text-xl font-black text-slate-900 mb-2">Confirmar Limpeza</h3>
+                        <p className="text-slate-600 mb-6">Tem certeza que deseja limpar todos os dados? Esta ação não pode ser desfeita.</p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowClearConfirm(false)}
+                                className="flex-1 py-3 bg-slate-100 rounded-xl font-black hover:bg-slate-200"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleClearData}
+                                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700"
+                            >
+                                Limpar Tudo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default Admin;
