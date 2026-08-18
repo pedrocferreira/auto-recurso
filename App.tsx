@@ -25,10 +25,13 @@ import {
   Printer,
   ShieldCheck,
   Zap,
-  Lock
+  Lock,
+  Download,
+  FileText
 } from 'lucide-react';
 
 const App: React.FC = () => {
+  const isDevMode = import.meta.env.VITE_APP_MODE === 'dev';
   const [step, setStep] = useState<AppStep>(AppStep.START);
   const [error, setError] = useState<string | null>(null);
   const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
@@ -71,6 +74,11 @@ const App: React.FC = () => {
     if (savedPersonalData) {
       const parsed = JSON.parse(savedPersonalData);
       setPersonalData(prev => ({ ...prev, ...parsed }));
+    }
+
+    const savedStep = localStorage.getItem('appStep') as AppStep | null;
+    if (savedStep === AppStep.PAYMENT || savedStep === AppStep.FINAL_DOCUMENT) {
+      setStep(savedStep);
     }
 
     // Fetch admin settings from backend
@@ -141,35 +149,45 @@ const App: React.FC = () => {
     }
   }, [ticketInfo]);
 
+  const handleVerifyPayment = async () => {
+    setIsProcessing(true);
+    setError(null);
+    const paymentEmail = localStorage.getItem('paymentEmail');
+    
+    if (!paymentEmail) {
+      setError("E-mail não encontrado na sua sessão. Por favor, volte e preencha seus dados novamente.");
+      setIsProcessing(false);
+      return;
+    }
+    
+    try {
+      const status = await checkKiwifyPaymentStatus(paymentEmail);
+      if (status === 'PAID') {
+        logEvent('payment_completed', { email: paymentEmail, amount: 24.90 });
+        handleGenerateDocument();
+      } else {
+        logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${status}` });
+        setError(`O pagamento ainda não foi confirmado (Status: ${status}). Aguarde alguns instantes e tente novamente.`);
+      }
+    } catch (err) {
+      console.error("Erro ao verificar pagamento:", err);
+      logEvent('payment_failed', { email: paymentEmail, errorMessage: String(err) });
+      setError("Não conseguimos confirmar seu pagamento automaticamente agora. Por favor, tente novamente.");
+    }
+    setIsProcessing(false);
+  };
+
   useEffect(() => {
-    const checkPayment = async () => {
+    const checkPaymentOnLoad = async () => {
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('success') === 'true') {
         const savedStep = localStorage.getItem('appStep');
-        const paymentEmail = localStorage.getItem('paymentEmail');
-
-        if (savedStep === AppStep.PAYMENT && paymentEmail) {
-          try {
-            const status = await checkKiwifyPaymentStatus(paymentEmail);
-            if (status === 'PAID') {
-              logEvent('payment_completed', { email: paymentEmail, amount: 24.90 });
-              handleGenerateDocument();
-            } else {
-              logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${status}` });
-              setError(`O pagamento ainda não foi confirmado (Status: ${status}). Tente novamente em alguns instantes.`);
-              setStep(AppStep.USER_DATA);
-            }
-          } catch (err) {
-            console.error("Erro ao verificar pagamento:", err);
-            logEvent('payment_failed', { email: paymentEmail, errorMessage: String(err) });
-            // Em caso de erro na API de verificação, voltamos para a tela de dados
-            setError("Não conseguimos confirmar seu pagamento automaticamente. Por favor, tente novamente.");
-            setStep(AppStep.USER_DATA);
-          }
+        if (savedStep === AppStep.PAYMENT) {
+          handleVerifyPayment();
         }
       }
     };
-    checkPayment();
+    checkPaymentOnLoad();
   }, []);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -685,12 +703,17 @@ const App: React.FC = () => {
                 disabled={!isFormValid || isProcessing}
                 onClick={() => {
                   if (!isFormValid) return;
-                  setStep(AppStep.PAYMENT);
+                  if (isDevMode) {
+                    // Dev mode: skip payment, go straight to generating
+                    handleGenerateDocument();
+                  } else {
+                    setStep(AppStep.PAYMENT);
+                  }
                   window.scrollTo(0, 0);
                 }}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                className={`w-full py-5 ${isDevMode ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-2xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50`}
               >
-                PROSSEGUIR PARA PAGAMENTO
+                {isDevMode ? '⚡ GERAR RECURSO (MODO DEV)' : 'PROSSEGUIR PARA PAGAMENTO'}
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
@@ -806,7 +829,20 @@ const App: React.FC = () => {
                             });
 
                             const { url } = await redirectToKiwifyCheckout(personalData);
-                            window.location.href = url;
+                            
+                            // Send recovery email automatically in background
+                            fetch('/auto-api/email/checkout', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                email: personalData.email,
+                                name: personalData.fullName,
+                                checkoutUrl: url
+                              })
+                            }).catch(console.error);
+
+                            window.open(url, '_blank');
+                            setIsProcessing(false);
                           } catch (err: any) {
                             logEvent('payment_failed', {
                               customerEmail: personalData.email,
@@ -821,6 +857,14 @@ const App: React.FC = () => {
                         {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PAGAR AGORA"}
                       </button>
                     )}
+
+                    <button
+                      disabled={isProcessing}
+                      onClick={handleVerifyPayment}
+                      className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-3"
+                    >
+                      {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : "JÁ FIZ O PAGAMENTO / VERIFICAR AGORA"}
+                    </button>
 
                     <button
                       onClick={() => setStep(AppStep.USER_DATA)}
@@ -862,7 +906,38 @@ const App: React.FC = () => {
                   <h2 className="text-2xl font-black text-slate-900">Recurso Concluído</h2>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => window.print()} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black flex items-center gap-2 hover:bg-blue-700 transition-all">
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/auto-api/generate/docx', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            content: finalDocument,
+                            personalData,
+                            ticketInfo
+                          })
+                        });
+                        if (!res.ok) throw new Error('Erro ao gerar DOCX');
+                        const blob = await res.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Recurso_${ticketInfo?.vehiclePlate || 'AutoRecurso'}.docx`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                      } catch (err) {
+                        console.error('Erro ao baixar DOCX:', err);
+                        alert('Erro ao gerar o documento. Tente novamente.');
+                      }
+                    }} 
+                    className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black flex items-center gap-2 hover:bg-blue-700 transition-all"
+                  >
+                    <Download className="w-5 h-5" /> BAIXAR DOCX
+                  </button>
+                  <button onClick={() => window.print()} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-black flex items-center gap-2 hover:bg-slate-300 transition-all">
                     <Printer className="w-5 h-5" /> IMPRIMIR
                   </button>
                 </div>
@@ -877,7 +952,37 @@ const App: React.FC = () => {
 
               <div className="mt-8 grid grid-cols-2 gap-4 no-print">
                 <button onClick={() => setStep(AppStep.START)} className="py-4 bg-slate-100 text-slate-600 rounded-xl font-black">NOVO RECURSO</button>
-                <button onClick={() => window.print()} className="py-4 bg-blue-600 text-white rounded-xl font-black shadow-lg">BAIXAR PDF</button>
+                <button 
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/auto-api/generate/docx', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          content: finalDocument,
+                          personalData,
+                          ticketInfo
+                        })
+                      });
+                      if (!res.ok) throw new Error('Erro ao gerar DOCX');
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `Recurso_${ticketInfo?.vehiclePlate || 'AutoRecurso'}.docx`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.URL.revokeObjectURL(url);
+                    } catch (err) {
+                      console.error('Erro ao baixar DOCX:', err);
+                      alert('Erro ao gerar o documento. Tente novamente.');
+                    }
+                  }}
+                  className="py-4 bg-blue-600 text-white rounded-xl font-black shadow-lg flex items-center justify-center gap-2"
+                >
+                  <FileText className="w-5 h-5" /> BAIXAR DOCX
+                </button>
               </div>
             </div>
           )}

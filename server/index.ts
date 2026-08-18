@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import jwt from 'jsonwebtoken';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle, Tab, TabStopType, TabStopPosition, Header, Footer, PageNumber, NumberFormat } from 'docx';
 import { Request, Response, NextFunction } from 'express';
 
 dotenv.config();
@@ -85,7 +86,33 @@ const saveData = (data: any) => {
 
 // --- Gemini Configuration ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const CANDIDATE_MODELS = [
+    process.env.GEMINI_MODEL,
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-2.5-flash'
+].filter(Boolean) as string[];
+
+async function generateWithModelFallback(getConfig: (modelName: string) => any, content: any) {
+    let lastError: any = null;
+    for (const modelName of CANDIDATE_MODELS) {
+        try {
+            console.log(`🤖 Calling Gemini with model: ${modelName}`);
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                ...getConfig(modelName)
+            });
+            const result = await model.generateContent(content);
+            const response = await result.response;
+            return response;
+        } catch (err: any) {
+            console.warn(`⚠️ [Gemini] Model ${modelName} failed (${err?.message || err}). Trying next candidate...`);
+            lastError = err;
+        }
+    }
+    throw lastError;
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_change_me_in_production';
 
 // --- Auth Middleware ---
@@ -122,53 +149,51 @@ app.post('/auto-api/generate/analyze', async (req, res) => {
             base64Image = base64Image.split('base64,')[1];
         }
 
-        const model = genAI.getGenerativeModel({
-            model: MODEL_NAME,
-            generationConfig: {
-                // ... existing config ...
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        violationType: { type: SchemaType.STRING },
-                        article: { type: SchemaType.STRING },
-                        location: { type: SchemaType.STRING },
-                        date: { type: SchemaType.STRING },
-                        vehiclePlate: { type: SchemaType.STRING },
-                        authority: { type: SchemaType.STRING },
-                        extractedPersonalInfo: {
-                            type: SchemaType.OBJECT,
-                            properties: {
-                                fullName: { type: SchemaType.STRING },
-                                cpf: { type: SchemaType.STRING },
-                                address: { type: SchemaType.STRING }
-                            }
-                        },
-                        strategies: {
-                            type: SchemaType.ARRAY,
-                            items: {
+        console.log('🤖 [Analyze] Calling Gemini API with cleaned image...');
+        const response = await generateWithModelFallback(
+            () => ({
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: SchemaType.OBJECT,
+                        properties: {
+                            violationType: { type: SchemaType.STRING },
+                            article: { type: SchemaType.STRING },
+                            location: { type: SchemaType.STRING },
+                            date: { type: SchemaType.STRING },
+                            vehiclePlate: { type: SchemaType.STRING },
+                            authority: { type: SchemaType.STRING },
+                            extractedPersonalInfo: {
                                 type: SchemaType.OBJECT,
                                 properties: {
-                                    id: { type: SchemaType.STRING },
-                                    title: { type: SchemaType.STRING },
-                                    description: { type: SchemaType.STRING }
-                                },
-                                required: ["id", "title", "description"]
+                                    fullName: { type: SchemaType.STRING },
+                                    cpf: { type: SchemaType.STRING },
+                                    address: { type: SchemaType.STRING }
+                                }
+                            },
+                            strategies: {
+                                type: SchemaType.ARRAY,
+                                items: {
+                                    type: SchemaType.OBJECT,
+                                    properties: {
+                                        id: { type: SchemaType.STRING },
+                                        title: { type: SchemaType.STRING },
+                                        description: { type: SchemaType.STRING }
+                                    },
+                                    required: ["id", "title", "description"]
+                                }
                             }
-                        }
-                    },
-                    required: ["violationType", "article", "location", "date", "vehiclePlate", "authority", "strategies"]
+                        },
+                        required: ["violationType", "article", "location", "date", "vehiclePlate", "authority", "strategies"]
+                    }
                 }
-            }
-        });
+            }),
+            [
+                { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+                { text: "Analise esta foto de uma multa de trânsito brasileira. Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis. IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (\"\"). NUNCA retorne textos como \"Não visível\", \"N/A\" ou similares. Retorne os dados estritamente no formato JSON conforme o schema especificado." }
+            ]
+        );
 
-        console.log('🤖 [Analyze] Calling Gemini API with cleaned image...');
-        const result = await model.generateContent([
-            { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-            { text: "Analise esta foto de uma multa de trânsito brasileira. Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis. IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (\"\"). NUNCA retorne textos como \"Não visível\", \"N/A\" ou similares. Retorne os dados estritamente no formato JSON conforme o schema especificado." }
-        ]);
-
-        const response = await result.response;
         console.log('✅ [Analyze] Gemini responded successfully');
         res.json(JSON.parse(response.text()));
     } catch (error: any) {
@@ -187,29 +212,28 @@ app.post('/auto-api/generate/analyze-cnh', async (req, res) => {
             base64Image = base64Image.split('base64,')[1];
         }
 
-        const model = genAI.getGenerativeModel({
-            model: MODEL_NAME,
-            generationConfig: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        fullName: { type: SchemaType.STRING },
-                        cpf: { type: SchemaType.STRING },
-                        rg: { type: SchemaType.STRING },
-                        cnh: { type: SchemaType.STRING },
-                        address: { type: SchemaType.STRING }
+        const response = await generateWithModelFallback(
+            () => ({
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: SchemaType.OBJECT,
+                        properties: {
+                            fullName: { type: SchemaType.STRING },
+                            cpf: { type: SchemaType.STRING },
+                            rg: { type: SchemaType.STRING },
+                            cnh: { type: SchemaType.STRING },
+                            address: { type: SchemaType.STRING }
+                        }
                     }
                 }
-            }
-        });
+            }),
+            [
+                { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+                { text: "Extraia os dados desta CNH (Carteira Nacional de Habilitação). Campos: Nome Completo, CPF, RG, Número da CNH e Endereço (se houver). IMPORTANTE: Se um dado não for encontrado, retorne uma string VAZIA (\"\"). Retorne estritamente em JSON." }
+            ]
+        );
 
-        const result = await model.generateContent([
-            { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-            { text: "Extraia os dados desta CNH (Carteira Nacional de Habilitação). Campos: Nome Completo, CPF, RG, Número da CNH e Endereço (se houver). IMPORTANTE: Se um dado não for encontrado, retorne uma string VAZIA (\"\"). Retorne estritamente em JSON." }
-        ]);
-
-        const response = await result.response;
         res.json(JSON.parse(response.text()));
     } catch (error: any) {
         console.error('❌ [Analyze CNH] Error:', error);
@@ -220,16 +244,48 @@ app.post('/auto-api/generate/analyze-cnh', async (req, res) => {
 app.post('/auto-api/generate/appeal', async (req, res) => {
     try {
         const { ticketInfo, selectedStrategyId, userReason, personalData, city, dateString } = req.body;
-        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const strategy = ticketInfo.strategies.find((s: any) => s.id === selectedStrategyId);
 
         const prompt = `
-    Aja como um renomado Advogado Especialista em Direito de Trânsito Brasileiro. Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO profissional e bem formatado em Markdown puro.
-    DADOS: Recorrente: ${personalData.fullName}, CPF: ${personalData.cpf}, Placa: ${ticketInfo.vehiclePlate}, Infração: ${ticketInfo.violationType}, Artigo: ${ticketInfo.article}, Tese: ${strategy?.title}, Relato: ${userReason}.
-    Retorne APENAS o texto do recurso em Markdown puro.`;
+Aja como um renomado Advogado Especialista em Direito de Trânsito Brasileiro. Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO profissional.
 
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
+REGRA ABSOLUTAMENTE OBRIGATÓRIA: NÃO use NENHUM placeholder, campo em branco, ou texto entre colchetes como [INSERIR...], [NÚMERO], [DATA], etc. TODOS os dados já foram fornecidos abaixo. Use-os DIRETAMENTE no texto. Se algum dado não estiver disponível, simplesmente omita aquela parte do texto. NUNCA peça para o usuário preencher nada.
+
+DADOS DO RECORRENTE:
+- Nome Completo: ${personalData.fullName}
+- CPF: ${personalData.cpf}
+- RG: ${personalData.rg || 'não informado'}
+- CNH: ${personalData.cnh || 'não informada'}
+- Endereço: ${personalData.address || 'não informado'}
+- Profissão: ${personalData.profession || 'não informada'}
+- Estado Civil: ${personalData.civilStatus || 'não informado'}
+
+DADOS DA INFRAÇÃO:
+- Tipo de Infração: ${ticketInfo.violationType}
+- Artigo/Enquadramento: ${ticketInfo.article}
+- Local da Infração: ${ticketInfo.location || 'não informado'}
+- Data da Infração: ${ticketInfo.date || 'não informada'}
+- Placa do Veículo: ${ticketInfo.vehiclePlate}
+- Órgão Autuador: ${ticketInfo.authority || 'DETRAN'}
+
+TESE DE DEFESA SELECIONADA: ${strategy?.title || 'Defesa geral'}
+DESCRIÇÃO DA TESE: ${strategy?.description || ''}
+RELATO DO CONDUTOR: ${userReason}
+
+CIDADE: ${city || 'não informada'}
+DATA DE HOJE: ${dateString}
+
+FORMATO DO RECURSO (texto corrido, SEM markdown):
+1. Cabeçalho com destinatário (órgão autuador)
+2. Identificação completa do recorrente (usar os dados acima)
+3. Dos Fatos (narrar o ocorrido usando os dados da infração)
+4. Do Direito (fundamentação jurídica com CTB, resoluções do CONTRAN, jurisprudência)
+5. Dos Pedidos (pedir cancelamento/arquivamento da multa)
+6. Fecho com local, data e assinatura
+
+IMPORTANTE: Retorne APENAS texto puro corrido. NÃO use formatação Markdown (sem #, ##, **, etc). Use apenas quebras de linha e texto normal. O texto será convertido diretamente em um documento DOCX.`;
+
+        const response = await generateWithModelFallback(() => ({}), prompt);
         res.json({ appeal: response.text() });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -254,8 +310,12 @@ app.get('/auto-api/payment/verify/:email', async (req, res) => {
         const token = await getKiwifyToken();
         const accountId = process.env.KIWIFY_ACCOUNT_ID || '';
 
-        // Search sales by customer email
-        const salesUrl = `https://public-api.kiwify.com/v1/sales?customer_email=${encodeURIComponent(email)}`;
+        const today = new Date();
+        const endDateStr = today.toISOString().split('T')[0] + ' 23:59';
+        today.setDate(today.getDate() - 5);
+        const startDateStr = today.toISOString().split('T')[0] + ' 00:00';
+
+        const salesUrl = `https://public-api.kiwify.com/v1/sales?start_date=${encodeURIComponent(startDateStr)}&end_date=${encodeURIComponent(endDateStr)}`;
         const response = await fetch(salesUrl, {
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -269,23 +329,23 @@ app.get('/auto-api/payment/verify/:email', async (req, res) => {
             return res.json({ status: 'ERROR', message: 'Failed to verify payment' });
         }
 
-        const result: any = await response.json();
-        const sales = result.data || [];
+        const data = (await response.json()) as any;
+        const sales = data.data || [];
+        
+        // Procurar pelas vendas do email, ordenar para pegar a mais recente
+        const customerSales = sales.filter((sale: any) => sale.customer && sale.customer.email.toLowerCase() === email.toLowerCase());
 
-        // Check if any sale is paid/approved (most recent first)
-        const paidSale = sales.find((sale: any) =>
-            sale.status === 'paid' ||
-            sale.status === 'approved' ||
-            sale.status === 'completed'
-        );
-
-        if (paidSale) {
-            console.log(`✅ [Kiwify] Payment confirmed for ${email}, sale ID: ${paidSale.id}`);
-            res.json({ status: 'PAID', saleId: paidSale.id });
-        } else {
-            console.log(`⏳ [Kiwify] No confirmed payment found for ${email}`);
-            res.json({ status: 'PENDING' });
+        if (customerSales.length === 0) {
+            console.log(`❌ [Kiwify] No sales found for email: ${email}`);
+            return res.json({ status: 'PENDING', message: 'Nenhum pagamento encontrado para este e-mail nos últimos dias.' });
         }
+
+        // A venda mais recente será a primeira (assumindo que a API retorna ordenado, mas vamos forçar verificação do status)
+        const latestSale = customerSales[0];
+        const status = latestSale.status === 'paid' ? 'PAID' : 'PENDING';
+        
+        console.log(`✅ [Kiwify] Payment status for ${email}: ${status}`);
+        res.json({ status });
     } catch (error: any) {
         console.error('❌ [Kiwify] Verification error:', error.message);
         res.status(500).json({ error: error.message });
@@ -457,6 +517,286 @@ app.post('/auto-api/email/send-pdf', async (req, res) => {
         res.json({ success: true, messageId: emailResult.messageId });
     } catch (error: any) {
         console.error('❌ [PDF Email] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/auto-api/email/checkout', async (req, res) => {
+    console.log('📨 [Checkout Email] Request received');
+    try {
+        const { email, name, checkoutUrl } = req.body;
+        
+        const emailPayload = {
+            sender: { name: 'AutoRecurso', email: 'recurso@autorecurso.online' },
+            to: [{ email, name }],
+            subject: 'Seu Recurso de Trânsito aguarda finalização! 🚗',
+            htmlContent: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h1 style="color: #1e40af;">Finalize seu Recurso de Trânsito</h1>
+                    <p>Olá <strong>${name}</strong>,</p>
+                    <p>O seu recurso já foi elaborado pela nossa Inteligência Artificial com base nos dados e teses jurídicas selecionados, e está pronto para ser baixado!</p>
+                    <p>Para concluir o pagamento e liberar o documento imediatamente, clique no botão abaixo:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${checkoutUrl}" style="background-color: #2563eb; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
+                            Concluir Pagamento
+                        </a>
+                    </div>
+                    <p>Assim que o pagamento for confirmado, você poderá baixar seu Recurso em PDF pronto para assinar.</p>
+                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                    <p style="color: #888; font-size: 12px;">AutoRecurso - Inteligência Artificial Jurídica</p>
+                </div>
+            `
+        };
+
+        const emailResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': process.env.BREVO_API_KEY || '',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify(emailPayload)
+        });
+
+        const emailResult: any = await emailResponse.json();
+        if (!emailResponse.ok) throw new Error(JSON.stringify(emailResult));
+
+        console.log('✅ [Checkout Email] Email sent successfully to:', email);
+        res.json({ success: true, messageId: emailResult.messageId });
+    } catch (error: any) {
+        console.error('❌ [Checkout Email] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/auto-api/generate/docx', async (req, res) => {
+    console.log('📄 [DOCX] Generation request received');
+    try {
+        const { content, personalData, ticketInfo } = req.body;
+
+        const lines = content.split('\n');
+        const children: Paragraph[] = [];
+
+        // ─── CABEÇALHO DO DOCUMENTO ───
+        children.push(new Paragraph({
+            children: [new TextRun({ text: 'RECURSO ADMINISTRATIVO', bold: true, size: 32, font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 80 }
+        }));
+        children.push(new Paragraph({
+            children: [new TextRun({ text: 'INFRAÇÃO DE TRÂNSITO', bold: true, size: 28, font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 }
+        }));
+
+        // Linha separadora
+        children.push(new Paragraph({
+            children: [new TextRun({ text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', size: 16, color: '333333', font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 }
+        }));
+
+        // ─── DADOS DO PROCESSO (quadro resumo) ───
+        const plate = ticketInfo?.vehiclePlate || '';
+        const article = ticketInfo?.article || '';
+        const infDate = ticketInfo?.date || '';
+        const authority = ticketInfo?.authority || 'DETRAN';
+
+        children.push(new Paragraph({
+            children: [
+                new TextRun({ text: 'Recorrente: ', bold: true, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: personalData?.fullName || '', size: 22, font: 'Times New Roman' })
+            ],
+            spacing: { after: 60 }
+        }));
+        children.push(new Paragraph({
+            children: [
+                new TextRun({ text: 'CPF: ', bold: true, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: personalData?.cpf || '', size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: '     RG: ', bold: true, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: personalData?.rg || '', size: 22, font: 'Times New Roman' })
+            ],
+            spacing: { after: 60 }
+        }));
+        children.push(new Paragraph({
+            children: [
+                new TextRun({ text: 'Placa: ', bold: true, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: plate, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: '     Artigo: ', bold: true, size: 22, font: 'Times New Roman' }),
+                new TextRun({ text: article, size: 22, font: 'Times New Roman' })
+            ],
+            spacing: { after: 60 }
+        }));
+        if (infDate) {
+            children.push(new Paragraph({
+                children: [
+                    new TextRun({ text: 'Data da Infração: ', bold: true, size: 22, font: 'Times New Roman' }),
+                    new TextRun({ text: infDate, size: 22, font: 'Times New Roman' }),
+                    new TextRun({ text: '     Órgão: ', bold: true, size: 22, font: 'Times New Roman' }),
+                    new TextRun({ text: authority, size: 22, font: 'Times New Roman' })
+                ],
+                spacing: { after: 60 }
+            }));
+        }
+
+        // Linha separadora
+        children.push(new Paragraph({
+            children: [new TextRun({ text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', size: 16, color: '333333', font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 200, after: 300 }
+        }));
+
+        // ─── CORPO DO RECURSO ───
+        for (const line of lines) {
+            const trimmed = line.trim();
+            
+            // Remove markdown formatting
+            let cleanLine = trimmed
+                .replace(/^#{1,6}\s*/, '')
+                .replace(/\*\*(.*?)\*\*/g, '$1')
+                .replace(/\*(.*?)\*/g, '$1')
+                .replace(/\[INSERIR[^\]]*\]/gi, '')
+                .replace(/\[.*?NÚMERO.*?\]/gi, '')
+                .replace(/\[.*?DATA.*?\]/gi, '')
+                .replace(/\[.*?AIT.*?\]/gi, '')
+                .replace(/\[.*?NOME.*?\]/gi, personalData?.fullName || '')
+                .replace(/\[.*?CPF.*?\]/gi, personalData?.cpf || '')
+                .replace(/\[.*?PLACA.*?\]/gi, ticketInfo?.vehiclePlate || '')
+                .trim();
+
+            // Linha vazia = espaço entre parágrafos
+            if (!cleanLine) {
+                children.push(new Paragraph({ children: [], spacing: { after: 120 } }));
+                continue;
+            }
+
+            // Detecta cabeçalhos de seção (tudo maiúsculo, ou certos padrões)
+            const isHeader = (
+                (cleanLine === cleanLine.toUpperCase() && cleanLine.length > 5 && cleanLine.length < 100 && !cleanLine.includes('.')) ||
+                /^(I{1,3}V?|V?I{0,3})\s*[-–.]\s*/i.test(cleanLine) ||
+                /^(DOS? |DAS? |DO |DA )/.test(cleanLine) && cleanLine === cleanLine.toUpperCase()
+            );
+
+            if (isHeader) {
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: cleanLine, bold: true, size: 24, font: 'Times New Roman' })],
+                    spacing: { before: 300, after: 160 },
+                    alignment: AlignmentType.LEFT
+                }));
+            } else {
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: cleanLine, size: 24, font: 'Times New Roman' })],
+                    spacing: { after: 100, line: 360 },
+                    alignment: AlignmentType.JUSTIFIED,
+                    indent: { firstLine: 708 }
+                }));
+            }
+        }
+
+        // ─── BLOCO DE ASSINATURA ───
+        children.push(new Paragraph({ children: [], spacing: { before: 600, after: 100 } }));
+        
+        // Data e local
+        const today = new Date();
+        const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+        const dateStr = `${today.getDate()} de ${months[today.getMonth()]} de ${today.getFullYear()}`;
+        
+        let location = '';
+        if (personalData?.address) {
+            const parts = personalData.address.split('-');
+            if (parts.length > 1) location = parts[parts.length - 1].trim();
+            else {
+                const commaParts = personalData.address.split(',');
+                if (commaParts.length > 1) location = commaParts[commaParts.length - 1].trim();
+            }
+        }
+        if (!location) location = '___________________';
+
+        children.push(new Paragraph({
+            children: [new TextRun({ text: `${location}, ${dateStr}.`, size: 24, font: 'Times New Roman' })],
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 600 }
+        }));
+
+        // Linha de assinatura
+        children.push(new Paragraph({
+            children: [new TextRun({ text: '________________________________________', size: 24, font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 60 }
+        }));
+        children.push(new Paragraph({
+            children: [new TextRun({ text: (personalData?.fullName || '').toUpperCase(), bold: true, size: 22, font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 40 }
+        }));
+        children.push(new Paragraph({
+            children: [new TextRun({ text: `CPF: ${personalData?.cpf || ''}`, size: 20, font: 'Times New Roman' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 40 }
+        }));
+        if (personalData?.rg) {
+            children.push(new Paragraph({
+                children: [new TextRun({ text: `RG: ${personalData.rg}`, size: 20, font: 'Times New Roman' })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 40 }
+            }));
+        }
+        children.push(new Paragraph({
+            children: [new TextRun({ text: 'Recorrente', italics: true, size: 20, font: 'Times New Roman', color: '555555' })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 }
+        }));
+
+        const doc = new Document({
+            styles: {
+                default: {
+                    document: {
+                        run: { font: 'Times New Roman', size: 24 }
+                    }
+                }
+            },
+            sections: [{
+                properties: {
+                    page: {
+                        margin: { top: 1701, right: 1134, bottom: 1134, left: 1701 },
+                        size: { width: 11906, height: 16838 }
+                    }
+                },
+                headers: {
+                    default: new Header({
+                        children: [
+                            new Paragraph({
+                                children: [new TextRun({ text: 'RECURSO ADMINISTRATIVO DE TRÂNSITO', size: 16, font: 'Times New Roman', color: '999999', italics: true })],
+                                alignment: AlignmentType.RIGHT
+                            })
+                        ]
+                    })
+                },
+                footers: {
+                    default: new Footer({
+                        children: [
+                            new Paragraph({
+                                children: [
+                                    new TextRun({ text: 'Documento gerado por AutoRecurso • autorecurso.xyz', size: 14, font: 'Times New Roman', color: 'AAAAAA', italics: true }),
+                                ],
+                                alignment: AlignmentType.CENTER
+                            })
+                        ]
+                    })
+                },
+                children
+            }]
+        });
+
+        const buffer = await Packer.toBuffer(doc);
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `attachment; filename=Recurso_${ticketInfo?.vehiclePlate || 'AutoRecurso'}.docx`);
+        res.send(buffer);
+
+        console.log('✅ [DOCX] Document generated successfully');
+    } catch (error: any) {
+        console.error('❌ [DOCX] Error:', error);
         res.status(500).json({ error: error.message });
     }
 });
