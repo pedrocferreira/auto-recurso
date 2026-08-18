@@ -306,9 +306,23 @@ app.post('/auto-api/payment/create', async (req, res) => {
 app.get('/auto-api/payment/verify/:email', async (req, res) => {
     try {
         const email = decodeURIComponent(req.params.email);
-        console.log(`🔍 [Kiwify] Verifying payment for email: ${email}`);
+        console.log(`🔍 [Payment Verify] Verifying payment for email: ${email}`);
+
+        // Dev Mode / Test Bypass
+        const isDev = process.env.APP_MODE === 'dev' || 
+                      req.query.dev === 'true' || 
+                      email.toLowerCase().includes('teste') || 
+                      email.toLowerCase().includes('test') || 
+                      email.toLowerCase().includes('dev');
+
+        if (isDev) {
+            console.log(`⚡ [Payment Verify] Dev mode active - Auto-approving payment for ${email}`);
+            return res.json({ status: 'PAID', isDev: true, message: 'Pagamento aprovado em modo de teste' });
+        }
+
         const token = await getKiwifyToken();
         const accountId = process.env.KIWIFY_ACCOUNT_ID || '';
+
 
         const today = new Date();
         const endDateStr = today.toISOString().split('T')[0] + ' 23:59';
@@ -400,8 +414,58 @@ app.post('/auto-api/admin/register-resource', (req, res) => {
     };
     data.resources.push(resource);
     saveData(data);
-    res.json({ success: true });
+    res.json({ success: true, resource });
 });
+
+app.post('/auto-api/resource/recover', (req, res) => {
+    try {
+        const { query } = req.body;
+        if (!query || typeof query !== 'string' || !query.trim()) {
+            return res.status(400).json({ success: false, message: 'Por favor, informe seu e-mail, CPF ou placa.' });
+        }
+
+        const data = loadData();
+        const raw = query.trim();
+        const cleanQuery = raw.toLowerCase();
+        const cleanDigits = raw.replace(/\D/g, '');
+        const cleanPlate = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        const foundResources = (data.resources || []).filter((r: any) => {
+            const emailMatch = r.customerEmail && r.customerEmail.toLowerCase().includes(cleanQuery);
+            const cpfDigits = (r.customerCpf || '').replace(/\D/g, '');
+            const cpfMatch = cleanDigits.length >= 7 && (cpfDigits.includes(cleanDigits) || cleanDigits.includes(cpfDigits));
+            const plateDigits = (r.ticketPlate || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const plateMatch = cleanPlate.length >= 4 && (plateDigits.includes(cleanPlate) || cleanPlate.includes(plateDigits));
+
+            return emailMatch || cpfMatch || plateMatch;
+        });
+
+        if (foundResources.length > 0) {
+            // Sort newest first
+            foundResources.sort((a: any, b: any) => (b.generatedAt || 0) - (a.generatedAt || 0));
+            return res.json({ success: true, resources: foundResources });
+        }
+
+        // Check if there was an attempt/payment started
+        const hasStarted = (data.events || []).some((e: any) => {
+            const emailMatch = e.data?.customerEmail && e.data.customerEmail.toLowerCase() === cleanQuery;
+            const cpfMatch = cleanDigits && (e.data?.customerCpf || '').replace(/\D/g, '') === cleanDigits;
+            return emailMatch || cpfMatch;
+        });
+
+        return res.json({
+            success: false,
+            hasPendingPayment: hasStarted,
+            message: hasStarted
+                ? 'Identificamos seu cadastro recente, mas o recurso ainda não foi gerado ou o pagamento está em processamento.'
+                : 'Nenhum recurso encontrado com estes dados. Por favor, verifique se digitou o e-mail, CPF ou placa corretamente.'
+        });
+    } catch (error: any) {
+        console.error('❌ [Recover Resource] Error:', error);
+        res.status(500).json({ success: false, message: 'Erro ao buscar recurso no servidor.' });
+    }
+});
+
 
 app.post('/auto-api/email/send', async (req, res) => {
     try {

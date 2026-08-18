@@ -62,3 +62,19 @@ export const clearAllData = async () => {
         headers: getAuthHeaders()
     });
 };
+
+export const searchResources = async (query: string): Promise<{ success: boolean; resources?: any[]; message?: string; hasPendingPayment?: boolean }> => {
+    try {
+        const response = await fetch('/auto-api/resource/recover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+        return await response.json();
+    } catch (error: any) {
+        console.error('Failed to recover resource:', error);
+        return { success: false, message: 'Erro ao conectar ao servidor. Tente novamente mais tarde.' };
+    }
+};
+
+

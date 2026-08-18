@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
-import { logEvent, registerResource, getAdminData } from './services/analyticsService';
+import { logEvent, registerResource, getAdminData, searchResources } from './services/analyticsService';
 import { sendResourceEmail, sendPdfEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
@@ -26,12 +26,38 @@ import {
   ShieldCheck,
   Zap,
   Lock,
-  Download,
-  FileText
+  Search,
+  Mail,
+  RefreshCw,
+  X,
+  ExternalLink,
+  FileCheck,
+  Check
 } from 'lucide-react';
 
 const App: React.FC = () => {
-  const isDevMode = import.meta.env.VITE_APP_MODE === 'dev';
+  const [isDevMode, setIsDevMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('dev') === 'true' || params.get('dev') === '1' || params.get('modo') === 'dev') {
+        localStorage.setItem('devMode', 'true');
+        return true;
+      }
+      if (params.get('dev') === 'false' || params.get('dev') === '0') {
+        localStorage.removeItem('devMode');
+        return false;
+      }
+      if (localStorage.getItem('devMode') === 'true') {
+        return true;
+      }
+      if (localStorage.getItem('devMode') === 'false') {
+        return false;
+      }
+    }
+    return import.meta.env.VITE_APP_MODE !== 'production';
+  });
+
+
   const [step, setStep] = useState<AppStep>(AppStep.START);
   const [error, setError] = useState<string | null>(null);
   const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
@@ -60,7 +86,17 @@ const App: React.FC = () => {
   const [adminSettings, setAdminSettings] = useState<any>({});
   const [showPrivacy, setShowPrivacy] = useState<boolean>(false);
 
+  // Recovery modal state
+  const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
+  const [recoveryQuery, setRecoveryQuery] = useState<string>('');
+  const [isRecovering, setIsRecovering] = useState<boolean>(false);
+  const [recoveryResults, setRecoveryResults] = useState<any[] | null>(null);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resendSuccessId, setResendSuccessId] = useState<string | null>(null);
+
   const [dataLoaded, setDataLoaded] = useState<boolean>(false);
+
 
   const loadInitialData = async () => {
     const savedTicketInfo = localStorage.getItem('ticketInfo');
@@ -152,8 +188,15 @@ const App: React.FC = () => {
   const handleVerifyPayment = async () => {
     setIsProcessing(true);
     setError(null);
-    const paymentEmail = localStorage.getItem('paymentEmail');
+    const paymentEmail = localStorage.getItem('paymentEmail') || personalData.email;
     
+    // In Dev Mode: automatically bypass and generate
+    if (isDevMode) {
+      logEvent('payment_completed', { email: paymentEmail || 'dev@teste.com', amount: 24.90, mode: 'dev' });
+      await handleGenerateDocument();
+      return;
+    }
+
     if (!paymentEmail) {
       setError("E-mail não encontrado na sua sessão. Por favor, volte e preencha seus dados novamente.");
       setIsProcessing(false);
@@ -177,9 +220,171 @@ const App: React.FC = () => {
     setIsProcessing(false);
   };
 
+
+  const handleLoadSampleTicket = () => {
+    const sampleTicket: TicketInfo = {
+      violationType: 'Transitar em velocidade superior à máxima permitida em até 20%',
+      article: 'Art. 218, I do CTB',
+      location: 'Av. Ipiranga, 6681 - Porto Alegre/RS',
+      date: '10/02/2026 14:32',
+      vehiclePlate: 'ABC-1D23',
+      authority: 'DETRAN-RS',
+      strategies: [
+        'Inconsistência formal na identificação do radar medidor (sem aferição do INMETRO há mais de 12 meses)',
+        'Ausência de sinalização regulamentar de velocidade máxima permitida (Placa R-19)',
+        'Defesa prévia por cerceamento de defesa e vício material na autuação'
+      ]
+    };
+    setTicketInfo(sampleTicket);
+    setSelectedStrategy(sampleTicket.strategies[0]);
+    setStep(AppStep.STRATEGY_SELECTION);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleFillSampleUserData = () => {
+    setPersonalData({
+      fullName: 'PEDRO DA COSTA FERREIRA',
+      cpf: '014.143.970-03',
+      rg: '1098765432',
+      cnh: '01234567890',
+      address: 'Av. Paulista, 1000, Apto 501 - Bela Vista, São Paulo/SP - CEP: 01310-100',
+      email: 'pedroocferreira@gmail.com',
+      phone: '(51) 98128-1898',
+      profession: 'Empresário',
+      civilStatus: 'Casado',
+      isDifferentDriver: false,
+      driverFullName: '',
+      driverCpf: '',
+      driverRg: '',
+      driverCnh: ''
+    });
+  };
+
+
+  const handleSearchRecovery = async (customQuery?: string) => {
+    const query = customQuery !== undefined ? customQuery : recoveryQuery;
+    if (!query || !query.trim()) {
+      setRecoveryMessage("Por favor, digite seu e-mail, CPF ou placa do veículo.");
+      return;
+    }
+    setIsRecovering(true);
+    setRecoveryMessage(null);
+    setRecoveryResults(null);
+    try {
+      const res = await searchResources(query.trim());
+      if (res.success && res.resources && res.resources.length > 0) {
+        setRecoveryResults(res.resources);
+      } else {
+        setRecoveryMessage(res.message || "Nenhum recurso encontrado com estes dados.");
+      }
+    } catch (err) {
+      console.error("Erro na busca de recuperação:", err);
+      setRecoveryMessage("Erro ao consultar o servidor. Tente novamente.");
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
+  const handleOpenRecoveredDocument = (resource: any) => {
+    setFinalDocument(resource.documentContent || '');
+    setPersonalData(prev => ({
+      ...prev,
+      fullName: resource.customerName || prev.fullName,
+      email: resource.customerEmail || prev.email,
+      cpf: resource.customerCpf || prev.cpf,
+      phone: resource.customerPhone || prev.phone,
+      rg: resource.customerRg || prev.rg,
+      cnh: resource.customerCnh || prev.cnh,
+      address: resource.customerAddress || prev.address
+    }));
+    setTicketInfo(prev => ({
+      violationType: prev?.violationType || 'Infração de Trânsito',
+      article: resource.ticketArticle || prev?.article || '',
+      location: resource.ticketLocation || prev?.location || '',
+      date: resource.ticketDate || prev?.date || '',
+      vehiclePlate: resource.ticketPlate || prev?.vehiclePlate || '',
+      authority: prev?.authority || 'DETRAN',
+      strategies: prev?.strategies || []
+    }));
+    setStep(AppStep.FINAL_DOCUMENT);
+    setShowRecoveryModal(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDownloadDocxDirect = async (resource: any) => {
+    try {
+      const res = await fetch('/auto-api/generate/docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: resource.documentContent,
+          personalData: {
+            fullName: resource.customerName,
+            cpf: resource.customerCpf,
+            rg: resource.customerRg,
+            cnh: resource.customerCnh,
+            address: resource.customerAddress
+          },
+          ticketInfo: {
+            vehiclePlate: resource.ticketPlate,
+            article: resource.ticketArticle,
+            date: resource.ticketDate,
+            authority: 'DETRAN'
+          }
+        })
+      });
+      if (!res.ok) throw new Error('Erro ao gerar DOCX');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Recurso_${resource.ticketPlate || 'AutoRecurso'}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Erro ao baixar DOCX:', err);
+      alert('Erro ao gerar o arquivo DOCX. Tente novamente.');
+    }
+  };
+
+  const handleResendPdfEmail = async (resource: any) => {
+    setResendingId(resource.id);
+    setResendSuccessId(null);
+    try {
+      await sendPdfEmail(
+        resource.customerEmail,
+        resource.customerName || 'Condutor',
+        resource.documentContent,
+        `Seu Recurso de Trânsito - ${resource.ticketPlate || 'AutoRecurso'}`
+      );
+      setResendSuccessId(resource.id);
+      setTimeout(() => setResendSuccessId(null), 5000);
+    } catch (err) {
+      console.error('Erro ao reenviar PDF:', err);
+      alert('Não foi possível reenviar o e-mail no momento. Tente novamente.');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
   useEffect(() => {
-    const checkPaymentOnLoad = async () => {
+    const checkQueryParams = async () => {
       const urlParams = new URLSearchParams(window.location.search);
+      const recoverParam = urlParams.get('recover');
+      const emailParam = urlParams.get('email');
+      const cpfParam = urlParams.get('cpf');
+
+      if (recoverParam === 'true' || emailParam || cpfParam) {
+        setShowRecoveryModal(true);
+        const targetQuery = emailParam || cpfParam || '';
+        if (targetQuery) {
+          setRecoveryQuery(targetQuery);
+          handleSearchRecovery(targetQuery);
+        }
+      }
+
       if (urlParams.get('success') === 'true') {
         const savedStep = localStorage.getItem('appStep');
         if (savedStep === AppStep.PAYMENT) {
@@ -187,8 +392,9 @@ const App: React.FC = () => {
         }
       }
     };
-    checkPaymentOnLoad();
+    checkQueryParams();
   }, []);
+
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -427,16 +633,34 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
       {/* Header Premium */}
-      <header className="w-full max-w-4xl flex justify-between items-center mb-8 no-print">
-        <div className="flex items-center gap-2">
+      <header className="w-full max-w-4xl flex flex-wrap justify-between items-center gap-4 mb-8 no-print">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setStep(AppStep.START)}>
           <div className="bg-blue-600 p-2 rounded-lg">
             <Scale className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tighter">AUTO <span className="text-blue-600">RECURSO</span></h1>
+          {isDevMode && (
+            <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-black rounded-lg animate-pulse">
+              ⚡ MODO DEV ATIVO
+            </span>
+          )}
         </div>
-        <div className="hidden md:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
-          <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
-          <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> IA Especialista</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setShowRecoveryModal(true);
+              setRecoveryMessage(null);
+            }}
+            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded-xl text-xs md:text-sm font-bold border border-slate-200 hover:border-blue-200 shadow-sm transition-all group"
+            title="Acesse o recurso que você já gerou e pagou"
+          >
+            <Search className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+            <span>Já pagou? <strong className="text-blue-600 font-black">Recuperar Recurso</strong></span>
+          </button>
+          <div className="hidden lg:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest pl-2">
+            <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
+            <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> IA Especialista</span>
+          </div>
         </div>
       </header>
 
@@ -511,14 +735,41 @@ const App: React.FC = () => {
                 <input type='file' className="hidden" accept="image/*" onChange={handleFileUpload} />
               </label>
 
+              {/* Dev Mode Shortcut */}
+              {isDevMode && (
+                <button
+                  type="button"
+                  onClick={handleLoadSampleTicket}
+                  className="mt-3 inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-2xl font-black text-xs transition-all w-full shadow-sm active:scale-95"
+                >
+                  ⚡ CARREGAR MULTA DE TESTE (MODO DEV)
+                </button>
+              )}
+
+              {/* Recovery CTA on Start Screen */}
+              <div className="mt-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRecoveryModal(true);
+                    setRecoveryMessage(null);
+                  }}
+                  className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors py-2 px-4 rounded-xl hover:bg-blue-50 border border-transparent hover:border-blue-100"
+                >
+                  <Search className="w-4 h-4 text-blue-500" />
+                  <span>Já realizou o pagamento? <span className="underline text-blue-600 font-extrabold">Clique aqui para recuperar seu documento</span></span>
+                </button>
+              </div>
+
+
               {/* Trust Badges */}
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-bold uppercase tracking-widest">
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-bold uppercase tracking-widest">
                 <span className="flex items-center gap-2"><Lock className="w-4 h-4 text-green-500" /> Dados Criptografados</span>
                 <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-green-500" /> LGPD Compliant</span>
-
               </div>
             </div>
           )}
+
 
           {(step === AppStep.ANALYZING || step === AppStep.GENERATING) && (
             <div className="p-20 flex flex-col items-center justify-center text-center">
@@ -691,11 +942,21 @@ const App: React.FC = () => {
                   />
                 </div>
 
-                <div className="pt-4">
+                <div className="pt-4 space-y-3">
                   <label className="flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 hover:border-blue-400 transition-all cursor-pointer">
                     {isCnhProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ScanLine className="w-5 h-5" /> Importar dados da CNH</>}
                     <input type="file" className="hidden" accept="image/*" onChange={handleCNHUpload} />
                   </label>
+
+                  {isDevMode && (
+                    <button
+                      type="button"
+                      onClick={handleFillSampleUserData}
+                      className="w-full py-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
+                    >
+                      ⚡ PREENCHER DADOS DE TESTE (MODO DEV)
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -711,13 +972,14 @@ const App: React.FC = () => {
                   }
                   window.scrollTo(0, 0);
                 }}
-                className={`w-full py-5 ${isDevMode ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-2xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50`}
+                className={`w-full py-5 ${isDevMode ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-2xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50`}
               >
-                {isDevMode ? '⚡ GERAR RECURSO (MODO DEV)' : 'PROSSEGUIR PARA PAGAMENTO'}
+                {isDevMode ? '⚡ GERAR RECURSO AGORA (MODO DEV - PULAR PAGAMENTO)' : 'PROSSEGUIR PARA PAGAMENTO'}
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
           )}
+
 
           {step === AppStep.PAYMENT && (
             <div className="p-8 md:p-12 animate-slideIn">
@@ -858,10 +1120,21 @@ const App: React.FC = () => {
                       </button>
                     )}
 
+                    {/* Dev Mode Instant Generator */}
+                    {isDevMode && (
+                      <button
+                        disabled={isProcessing}
+                        onClick={handleGenerateDocument}
+                        className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-lg transition-all flex items-center justify-center gap-2 mb-3 active:scale-95"
+                      >
+                        ⚡ GERAR RECURSO AGORA (MODO DEV - PULAR PAGAMENTO)
+                      </button>
+                    )}
+
                     <button
                       disabled={isProcessing}
                       onClick={handleVerifyPayment}
-                      className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-3"
+                      className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-1"
                     >
                       {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : "JÁ FIZ O PAGAMENTO / VERIFICAR AGORA"}
                     </button>
@@ -1047,6 +1320,193 @@ const App: React.FC = () => {
           .document-sheet { padding: 40px 20px; }
         }
       `}</style>
+
+      {/* Modal de Recuperação de Recurso */}
+      {showRecoveryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full p-6 md:p-8 animate-slideIn relative max-h-[90vh] overflow-y-auto">
+            {/* Fechar modal */}
+            <button
+              onClick={() => {
+                setShowRecoveryModal(false);
+                setRecoveryResults(null);
+                setRecoveryMessage(null);
+              }}
+              className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Cabeçalho */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-blue-50 text-blue-600 p-3 rounded-2xl">
+                <FileCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Recuperar Meu Recurso</h3>
+                <p className="text-xs text-slate-500">Localize seu recurso já pago por E-mail, CPF ou Placa</p>
+              </div>
+            </div>
+
+            {/* Formulário de Busca */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSearchRecovery();
+              }}
+              className="mt-6 mb-6"
+            >
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                E-mail, CPF ou Placa do Veículo
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={recoveryQuery}
+                    onChange={(e) => setRecoveryQuery(e.target.value)}
+                    placeholder="Ex: joao@email.com, 123.456.789-00 ou ABC1D23"
+                    className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isRecovering || !recoveryQuery.trim()}
+                  className="px-6 py-3.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
+                >
+                  {isRecovering ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Buscando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-4 h-4" />
+                      <span>Buscar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {/* Mensagem de Erro / Informação */}
+            {recoveryMessage && (
+              <div className="p-4 mb-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-3 animate-fadeIn">
+                <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold">{recoveryMessage}</p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    💡 Dica: Se o pagamento foi realizado via PIX ou cartão há menos de 1 minuto, aguarde alguns instantes para a compensação e tente novamente.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Resultados Encontrados */}
+            {recoveryResults && recoveryResults.length > 0 && (
+              <div className="space-y-4 mb-6">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
+                  {recoveryResults.length} recurso(s) encontrado(s):
+                </h4>
+                {recoveryResults.map((item: any) => (
+                  <div
+                    key={item.id}
+                    className="p-5 rounded-2xl border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-blue-300 hover:shadow-md transition-all space-y-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-black rounded-lg">
+                          🚗 {item.ticketPlate || 'PLACA N/D'}
+                        </span>
+                        {item.ticketArticle && (
+                          <span className="px-2.5 py-1 bg-slate-200 text-slate-800 text-xs font-bold rounded-lg">
+                            Art. {item.ticketArticle}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {item.generatedAt ? new Date(item.generatedAt).toLocaleString('pt-BR') : ''}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
+                      <div>
+                        <strong className="text-slate-800">Condutor / Requerente:</strong> {item.customerName || 'Não informado'}
+                      </div>
+                      <div>
+                        <strong className="text-slate-800">E-mail:</strong> {item.customerEmail || 'Não informado'}
+                      </div>
+                      {item.ticketLocation && (
+                        <div className="sm:col-span-2">
+                          <strong className="text-slate-800">Local:</strong> {item.ticketLocation}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ações para o recurso */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
+                      <button
+                        onClick={() => handleOpenRecoveredDocument(item)}
+                        className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                        title="Abrir recurso no visualizador para leitura e impressão"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>Visualizar</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDownloadDocxDirect(item)}
+                        className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                        title="Baixar arquivo DOCX formatado para Word"
+                      >
+                        <Download className="w-4 h-4 text-slate-600" />
+                        <span>Baixar DOCX</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleResendPdfEmail(item)}
+                        disabled={resendingId === item.id}
+                        className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm border ${
+                          resendSuccessId === item.id
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                        title="Enviar cópia em PDF para o e-mail do condutor"
+                      >
+                        {resendingId === item.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                            <span>Enviando...</span>
+                          </>
+                        ) : resendSuccessId === item.id ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-600" />
+                            <span>PDF Enviado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="w-4 h-4 text-slate-600" />
+                            <span>Enviar PDF</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Rodapé informativo */}
+            <div className="mt-4 pt-4 border-t border-slate-100 text-center">
+              <p className="text-[11px] text-slate-400">
+                🔒 Seus dados estão protegidos sob a LGPD e criptografia de ponta a ponta.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
