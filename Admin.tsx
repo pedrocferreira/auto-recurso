@@ -87,7 +87,7 @@ const Admin: React.FC = () => {
             setStats({
                 totalResources: data.resources.length,
                 resources24h: data.resources.filter((r: any) => r.generatedAt >= last24h).length,
-                totalRevenue: data.events.filter((e: any) => e.type === 'payment_completed').reduce((sum: number, e: any) => sum + (e.data.amount || 24.9), 0),
+                totalRevenue: data.events.filter((e: any) => e.type === 'payment_completed').reduce((sum: number, e: any) => sum + (e.data.amount || 39.9), 0),
                 payments24h: data.events.filter((e: any) => e.type === 'payment_completed' && e.timestamp >= last24h).length,
                 totalErrors: data.events.filter((e: any) => e.type === 'generation_error').length,
                 successRate: data.resources.length > 0 ? ((data.resources.length / data.events.filter((e: any) => e.type === 'payment_completed').length || 1) * 100).toFixed(1) : '0',

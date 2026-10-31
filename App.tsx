@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from './services/geminiService';
+import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal, analyzeManualTicket } from './services/geminiService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
-import { logEvent, registerResource, getAdminData, searchResources } from './services/analyticsService';
+import { logEvent, registerResource, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
 import { sendResourceEmail, sendPdfEmail } from './services/emailService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
@@ -37,6 +37,8 @@ import {
 
 const App: React.FC = () => {
   const [isDevMode, setIsDevMode] = useState<boolean>(() => {
+    // Em produção o modo dev nunca é ativado (nem por ?dev=true nem por localStorage)
+    if (import.meta.env.VITE_APP_MODE === 'production') return false;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('dev') === 'true' || params.get('dev') === '1' || params.get('modo') === 'dev') {
@@ -96,6 +98,62 @@ const App: React.FC = () => {
   const [resendSuccessId, setResendSuccessId] = useState<string | null>(null);
 
   const [dataLoaded, setDataLoaded] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isEditingTicket, setIsEditingTicket] = useState<boolean>(false);
+
+  // Manual Ticket Modal state
+  const [showManualModal, setShowManualModal] = useState<boolean>(false);
+  const [isAnalyzingManual, setIsAnalyzingManual] = useState<boolean>(false);
+  const [manualTicketForm, setManualTicketForm] = useState({
+    vehiclePlate: '',
+    article: '',
+    date: '',
+    location: '',
+    authority: ''
+  });
+
+  const handleSubmitManualTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAnalyzingManual(true);
+    setError(null);
+    try {
+      const data = await analyzeManualTicket({
+        vehiclePlate: manualTicketForm.vehiclePlate.trim().toUpperCase(),
+        article: manualTicketForm.article.trim(),
+        violationType: manualTicketForm.article.trim(),
+        date: manualTicketForm.date.trim() || new Date().toLocaleDateString('pt-BR'),
+        location: manualTicketForm.location.trim(),
+        authority: manualTicketForm.authority.trim().toUpperCase() || 'DETRAN'
+      });
+      setTicketInfo(data);
+      if (data.strategies && data.strategies.length > 0) {
+        setSelectedStrategy(data.strategies[0].id);
+      }
+      setShowManualModal(false);
+      setStep(AppStep.STRATEGY_SELECTION);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      console.error("Erro ao analisar multa manual:", err);
+      setError("Erro ao processar dados da multa. Tente novamente.");
+    } finally {
+      setIsAnalyzingManual(false);
+    }
+  };
+
+  const formatCPF = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+    if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  };
+
+  const formatPhone = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 2) return digits ? `(${digits}` : '';
+    if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  };
 
 
   const loadInitialData = async () => {
@@ -117,12 +175,12 @@ const App: React.FC = () => {
       setStep(savedStep);
     }
 
-    // Fetch admin settings from backend
+    // Fetch public settings from backend
     try {
-      const data = await getAdminData();
-      setAdminSettings(data.settings);
+      const publicSettings = await getPublicSettings();
+      setAdminSettings(publicSettings);
     } catch (err) {
-      console.error("Failed to load settings:", err);
+      console.warn("Failed to load public settings:", err);
     }
 
     setDataLoaded(true);
@@ -192,7 +250,12 @@ const App: React.FC = () => {
     
     // In Dev Mode: automatically bypass and generate
     if (isDevMode) {
-      logEvent('payment_completed', { email: paymentEmail || 'dev@teste.com', amount: 24.90, mode: 'dev' });
+      logEvent('payment_completed', { email: paymentEmail || 'dev@teste.com', amount: 39.90, mode: 'dev' });
+      trackPurchaseConversion({
+        email: paymentEmail || 'dev@teste.com',
+        amount: 39.90,
+        ticketPlate: ticketInfo?.vehiclePlate
+      });
       await handleGenerateDocument();
       return;
     }
@@ -204,18 +267,23 @@ const App: React.FC = () => {
     }
     
     try {
-      const status = await checkKiwifyPaymentStatus(paymentEmail);
-      if (status === 'PAID') {
-        logEvent('payment_completed', { email: paymentEmail, amount: 24.90 });
+      const result = await checkKiwifyPaymentStatus(paymentEmail);
+      if (result.status === 'PAID') {
+        logEvent('payment_completed', { email: paymentEmail, amount: 39.90 });
+        trackPurchaseConversion({
+          email: paymentEmail,
+          amount: 39.90,
+          ticketPlate: personalData.ticketPlate || ticketInfo?.vehiclePlate
+        });
         handleGenerateDocument();
       } else {
-        logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${status}` });
-        setError(`O pagamento ainda não foi confirmado (Status: ${status}). Aguarde alguns instantes e tente novamente.`);
+        logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${result.status}` });
+        setError(result.message || `O pagamento ainda não foi confirmado (Status: ${result.status}). Se você acabou de pagar via PIX ou Cartão, aguarde alguns instantes e clique em verificar novamente.`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao verificar pagamento:", err);
-      logEvent('payment_failed', { email: paymentEmail, errorMessage: String(err) });
-      setError("Não conseguimos confirmar seu pagamento automaticamente agora. Por favor, tente novamente.");
+      logEvent('payment_failed', { email: paymentEmail, errorMessage: err.message || String(err) });
+      setError(err.message || "Não conseguimos consultar seu pagamento agora. Por favor, tente novamente em instantes.");
     }
     setIsProcessing(false);
   };
@@ -230,13 +298,25 @@ const App: React.FC = () => {
       vehiclePlate: 'ABC-1D23',
       authority: 'DETRAN-RS',
       strategies: [
-        'Inconsistência formal na identificação do radar medidor (sem aferição do INMETRO há mais de 12 meses)',
-        'Ausência de sinalização regulamentar de velocidade máxima permitida (Placa R-19)',
-        'Defesa prévia por cerceamento de defesa e vício material na autuação'
+        {
+          id: '1',
+          title: 'Inconsistência formal no radar',
+          description: 'Inconsistência formal na identificação do radar medidor (sem aferição do INMETRO há mais de 12 meses)'
+        },
+        {
+          id: '2',
+          title: 'Ausência de sinalização regulamentar',
+          description: 'Ausência de sinalização regulamentar de velocidade máxima permitida (Placa R-19)'
+        },
+        {
+          id: '3',
+          title: 'Cerceamento de defesa e vício material',
+          description: 'Defesa prévia por cerceamento de defesa e vício material na autuação'
+        }
       ]
     };
     setTicketInfo(sampleTicket);
-    setSelectedStrategy(sampleTicket.strategies[0]);
+    setSelectedStrategy(sampleTicket.strategies[0].id);
     setStep(AppStep.STRATEGY_SELECTION);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -404,8 +484,10 @@ const App: React.FC = () => {
     try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const data = await analyzeTicketImage(base64);
+        const resultStr = reader.result as string;
+        const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+        const base64 = resultStr.includes('base64,') ? resultStr.split('base64,')[1] : resultStr;
+        const data = await analyzeTicketImage(base64, mimeType);
         setTicketInfo(data);
         setStep(AppStep.STRATEGY_SELECTION);
         setIsProcessing(false);
@@ -425,8 +507,10 @@ const App: React.FC = () => {
     try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const data = await analyzeCNHImage(base64);
+        const resultStr = reader.result as string;
+        const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+        const base64 = resultStr.includes('base64,') ? resultStr.split('base64,')[1] : resultStr;
+        const data = await analyzeCNHImage(base64, mimeType);
         setPersonalData(prev => ({
           ...prev,
           fullName: data.fullName || prev.fullName,
@@ -452,7 +536,7 @@ const App: React.FC = () => {
     }, 2500);
   };
 
-  const handleGenerateDocument = async () => {
+  const handleGenerateDocument = async (options: { useFreeGeneration?: boolean } = {}) => {
     let currentTicketInfo = ticketInfo;
     let currentSelectedStrategy = selectedStrategy;
     let currentUserReason = userReason;
@@ -525,7 +609,11 @@ const App: React.FC = () => {
         currentUserReason,
         currentPersonalData,
         city,
-        dateString
+        dateString,
+        {
+          paymentEmail: localStorage.getItem('paymentEmail') || currentPersonalData.email,
+          useFreeGeneration: options.useFreeGeneration
+        }
       );
 
       logEvent('resource_generated', {
@@ -590,6 +678,11 @@ const App: React.FC = () => {
 
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
+      trackPurchaseConversion({
+        email: currentPersonalData.email,
+        amount: 39.90,
+        ticketPlate: currentTicketInfo.vehiclePlate
+      });
       // Limpar localStorage após sucesso
       localStorage.removeItem('appStep');
       localStorage.removeItem('ticketInfo');
@@ -603,7 +696,7 @@ const App: React.FC = () => {
         customerEmail: currentPersonalData.email,
         errorMessage: String(err)
       });
-      setError("Erro ao gerar recurso.");
+      setError(err instanceof Error && err.message ? err.message : "Erro ao gerar recurso.");
       setStep(AppStep.USER_DATA);
     } finally {
       setIsProcessing(false);
@@ -629,6 +722,19 @@ const App: React.FC = () => {
   if (showPrivacy) {
     return <PrivacyPolicy onBack={() => setShowPrivacy(false)} />;
   }
+
+  const PRICE_LABEL = 'R$ 39,90';
+  const isFreeGenerationAvailable = adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit;
+
+  // data-cta distingue os cliques do topo e do rodapé no GTM
+  const renderUploadCta = (position: 'hero' | 'bottom') => (
+    <label data-cta={position} className="relative inline-flex items-center justify-center gap-3 px-10 py-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-2xl font-black text-xl shadow-2xl hover:from-blue-700 hover:to-blue-800 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full group overflow-hidden">
+      <span className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></span>
+      <Upload className="w-6 h-6" />
+      ENVIAR FOTO OU PDF DA MULTA
+      <input type='file' className="hidden" accept="image/*,application/pdf,.pdf" onChange={handleFileUpload} />
+    </label>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-6 px-4">
@@ -688,14 +794,35 @@ const App: React.FC = () => {
                 <p className="text-slate-500 text-lg max-w-xl mx-auto">
                   Nossa IA analisa o CTB em tempo real e gera defesas com mais de 90% de precisão técnica.
                 </p>
+
+                {/* Preço acima da dobra: confirma o valor prometido no anúncio */}
+                <div className="mt-6 inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-4 px-6 py-4 bg-blue-50 border border-blue-200 rounded-2xl">
+                  {isFreeGenerationAvailable ? (
+                    <p className="flex items-baseline gap-2">
+                      <span className="text-lg font-bold text-slate-400 line-through">{PRICE_LABEL}</span>
+                      <span className="text-3xl md:text-4xl font-black text-green-600">GRÁTIS</span>
+                    </p>
+                  ) : (
+                    <p className="text-3xl md:text-4xl font-black text-blue-600 whitespace-nowrap">{PRICE_LABEL}</p>
+                  )}
+                  <p className="text-sm text-slate-600 font-medium text-center sm:text-left leading-snug max-w-xs">
+                    {isFreeGenerationAvailable
+                      ? 'Por tempo limitado: análise e recurso sem custo.'
+                      : 'Pagamento único via PIX. A análise da multa é grátis: você só paga para gerar o recurso.'}
+                  </p>
+                </div>
+
+                <div className="mt-6">
+                  {renderUploadCta('hero')}
+                </div>
               </div>
 
               {/* How To Steps */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
                 {[
-                  { num: '1', icon: <Camera className="w-8 h-8" />, title: 'Envie a Multa', desc: 'Fotografe o auto de infração ou a notificação. Quanto mais legível, melhor a análise.' },
+                  { num: '1', icon: <Camera className="w-8 h-8" />, title: 'Envie a Multa', desc: 'Fotografe ou envie o PDF da notificação de autuação.' },
                   { num: '2', icon: <Scale className="w-8 h-8" />, title: 'Escolha a Tese', desc: 'A IA identifica falhas e sugere teses de defesa. Você escolhe a que mais faz sentido.' },
-                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado em Markdown pronto para imprimir ou enviar ao DETRAN.' }
+                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado em documento oficial formatado e pronto para imprimir ou baixar em Word/PDF.' }
                 ].map((s, i) => (
                   <div key={i} className="relative bg-gradient-to-br from-slate-50 to-white p-6 rounded-2xl border border-slate-100 hover:shadow-lg transition-shadow group">
                     <div className="absolute -top-3 -left-3 w-8 h-8 bg-blue-600 text-white rounded-xl flex items-center justify-center font-black text-sm shadow-lg">
@@ -710,12 +837,20 @@ const App: React.FC = () => {
                 ))}
               </div>
 
+              {/* Banner de Prova Social */}
+              <div className="mb-6 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-center animate-fadeIn">
+                <p className="text-xs md:text-sm font-black text-emerald-800 flex items-center justify-center gap-2">
+                  <span>🎉</span>
+                  <span><strong>+ de 100 multas</strong> já foram anuladas com a nossa Inteligência Artificial!</span>
+                </p>
+              </div>
+
               {/* Value Props */}
               <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 md:p-8 mb-10">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                   {[
                     { val: '15 seg', label: 'Análise da Multa' },
-                    { val: '+1.2k', label: 'Recursos Gerados' },
+                    { val: '+100', label: 'Multas Anuladas' },
                     { val: '90%', label: 'Precisão Jurídica' },
                     { val: '24/7', label: 'Disponibilidade' }
                   ].map((m, i) => (
@@ -728,12 +863,22 @@ const App: React.FC = () => {
               </div>
 
               {/* CTA Button */}
-              <label className="relative inline-flex items-center justify-center gap-3 px-10 py-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-2xl font-black text-xl shadow-2xl hover:from-blue-700 hover:to-blue-800 transition-all cursor-pointer transform hover:-translate-y-1 active:scale-95 w-full group overflow-hidden">
-                <span className="absolute inset-0 bg-gradient-to-r from-blue-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></span>
-                <Upload className="w-6 h-6" />
-                ENVIAR FOTO DA MULTA
-                <input type='file' className="hidden" accept="image/*" onChange={handleFileUpload} />
-              </label>
+              {renderUploadCta('bottom')}
+              <p className="mt-2 text-center text-xs text-slate-500 font-medium">
+                {isFreeGenerationAvailable
+                  ? 'Análise e recurso grátis por tempo limitado'
+                  : `Análise grátis · ${PRICE_LABEL} só para gerar o recurso`}
+              </p>
+
+              {/* Botão de Preenchimento Manual */}
+              <button
+                type="button"
+                onClick={() => setShowManualModal(true)}
+                className="mt-3 inline-flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-black text-sm transition-all w-full border border-slate-200 hover:border-slate-300 shadow-sm active:scale-95"
+              >
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span>Não tem a foto? <strong>Preencher dados da multa manualmente</strong></span>
+              </button>
 
               {/* Dev Mode Shortcut */}
               {isDevMode && (
@@ -783,24 +928,76 @@ const App: React.FC = () => {
             <div className="p-8 animate-slideIn">
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-2xl font-black text-slate-900">Diagnóstico da Multa</h2>
-                <div className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-black uppercase tracking-tighter animate-pulse">
-                  Falha Identificada
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsEditingTicket(!isEditingTicket)}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all"
+                  >
+                    {isEditingTicket ? 'Concluir Edição' : '✏️ Editar Dados'}
+                  </button>
+                  <div className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-black uppercase tracking-tighter animate-pulse">
+                    Falha Identificada
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                {[
-                  { label: "Placa", val: ticketInfo.vehiclePlate },
-                  { label: "Artigo", val: ticketInfo.article },
-                  { label: "Data", val: ticketInfo.date },
-                  { label: "Órgão", val: ticketInfo.authority }
-                ].map((i, k) => (
-                  <div key={k} className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
-                    <p className="text-[10px] uppercase font-black text-slate-400 mb-1">{i.label}</p>
-                    <p className="text-sm font-bold text-slate-800 truncate">{i.val}</p>
+              {isEditingTicket ? (
+                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200 mb-8 space-y-3 animate-fadeIn">
+                  <p className="text-xs font-bold text-blue-900 mb-1">Ajuste os dados extraídos se necessário:</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Placa</label>
+                      <input
+                        type="text"
+                        value={ticketInfo.vehiclePlate}
+                        onChange={(e) => setTicketInfo({ ...ticketInfo, vehiclePlate: e.target.value })}
+                        className="w-full p-2 text-xs font-bold bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Artigo</label>
+                      <input
+                        type="text"
+                        value={ticketInfo.article}
+                        onChange={(e) => setTicketInfo({ ...ticketInfo, article: e.target.value })}
+                        className="w-full p-2 text-xs font-bold bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Data</label>
+                      <input
+                        type="text"
+                        value={ticketInfo.date}
+                        onChange={(e) => setTicketInfo({ ...ticketInfo, date: e.target.value })}
+                        className="w-full p-2 text-xs font-bold bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Órgão</label>
+                      <input
+                        type="text"
+                        value={ticketInfo.authority}
+                        onChange={(e) => setTicketInfo({ ...ticketInfo, authority: e.target.value })}
+                        className="w-full p-2 text-xs font-bold bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                  {[
+                    { label: "Placa", val: ticketInfo.vehiclePlate },
+                    { label: "Artigo", val: ticketInfo.article },
+                    { label: "Data", val: ticketInfo.date },
+                    { label: "Órgão", val: ticketInfo.authority }
+                  ].map((i, k) => (
+                    <div key={k} className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                      <p className="text-[10px] uppercase font-black text-slate-400 mb-1">{i.label}</p>
+                      <p className="text-sm font-bold text-slate-800 truncate">{i.val}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <h3 className="text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
                 Escolha sua Estratégia de Defesa:
@@ -810,10 +1007,15 @@ const App: React.FC = () => {
                   <button
                     key={s.id}
                     onClick={() => setSelectedStrategy(s.id)}
-                    className={`w-full text-left p-5 rounded-2xl border-2 transition-all ${selectedStrategy === s.id ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-200'}`}
+                    className={`w-full text-left p-5 rounded-2xl border-2 transition-all relative ${selectedStrategy === s.id ? 'border-blue-600 bg-blue-50/70 shadow-sm' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
                   >
-                    <h4 className="font-black text-slate-900">{s.title}</h4>
-                    <p className="text-xs text-slate-600 mt-1">{s.description}</p>
+                    {selectedStrategy === s.id && (
+                      <div className="absolute top-4 right-4 bg-blue-600 text-white rounded-full p-1">
+                        <Check className="w-4 h-4" />
+                      </div>
+                    )}
+                    <h4 className="font-black text-slate-900 pr-8">{s.title}</h4>
+                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">{s.description}</p>
                   </button>
                 ))}
               </div>
@@ -821,7 +1023,7 @@ const App: React.FC = () => {
               <button
                 disabled={!selectedStrategy}
                 onClick={() => setStep(AppStep.USER_INPUT)}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 shadow-xl disabled:opacity-50"
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg hover:bg-blue-700 shadow-xl disabled:opacity-50 transition-all"
               >
                 PROSSEGUIR PARA O RECURSO
               </button>
@@ -830,8 +1032,35 @@ const App: React.FC = () => {
 
           {step === AppStep.USER_INPUT && (
             <div className="p-8 animate-slideIn">
-              <h2 className="text-2xl font-black text-slate-900 mb-4">Sua Versão dos Fatos</h2>
-              <p className="text-slate-500 mb-6 text-sm">Adicione detalhes que a IA deve considerar (ex: buracos na via, falta de sinalização, emergência médica).</p>
+              <h2 className="text-2xl font-black text-slate-900 mb-2">Sua Versão dos Fatos</h2>
+              <p className="text-slate-500 mb-4 text-sm">Adicione detalhes que a IA deve considerar no seu recurso. Você pode digitar ou clicar nas sugestões abaixo:</p>
+
+              {/* Sugestões Rápidas */}
+              <div className="mb-6 space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">💡 Clique para adicionar motivos rápidos:</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "🚨 Emergência médica / transporte de enfermo",
+                    "🛑 Placa de velocidade ausente ou encoberta",
+                    "🚗 Veículo já vendido na data da multa",
+                    "📷 Radar sem aferição recente do INMETRO",
+                    "🌧️ Condições de chuva / visibilidade reduzida",
+                    "⚠️ Desvio de obstáculo ou perigo na via"
+                  ].map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setUserReason(prev => prev ? `${prev}. ${suggestion}` : suggestion);
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 border border-slate-200 hover:border-blue-200 rounded-xl text-xs font-bold transition-all active:scale-95 text-left"
+                    >
+                      + {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <textarea
                 value={userReason}
                 onChange={(e) => setUserReason(e.target.value)}
@@ -840,7 +1069,7 @@ const App: React.FC = () => {
               />
               <button
                 onClick={() => setStep(AppStep.USER_DATA)}
-                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl"
+                className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-blue-700 transition-all"
               >
                 CONFIGURAR CABEÇALHO JURÍDICO
               </button>
@@ -859,7 +1088,7 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <input
                     type="text" placeholder="CPF" value={personalData.cpf}
-                    onChange={(e) => setPersonalData({ ...personalData, cpf: e.target.value })}
+                    onChange={(e) => setPersonalData({ ...personalData, cpf: formatCPF(e.target.value) })}
                     className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                   />
                   <input
@@ -886,7 +1115,7 @@ const App: React.FC = () => {
                   />
                   <input
                     type="tel" placeholder="Telefone" value={personalData.phone}
-                    onChange={(e) => setPersonalData({ ...personalData, phone: e.target.value })}
+                    onChange={(e) => setPersonalData({ ...personalData, phone: formatPhone(e.target.value) })}
                     className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                   />
                 </div>
@@ -944,8 +1173,8 @@ const App: React.FC = () => {
 
                 <div className="pt-4 space-y-3">
                   <label className="flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 hover:border-blue-400 transition-all cursor-pointer">
-                    {isCnhProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ScanLine className="w-5 h-5" /> Importar dados da CNH</>}
-                    <input type="file" className="hidden" accept="image/*" onChange={handleCNHUpload} />
+                    {isCnhProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ScanLine className="w-5 h-5" /> Importar dados da CNH (Foto ou PDF)</>}
+                    <input type="file" className="hidden" accept="image/*,application/pdf,.pdf" onChange={handleCNHUpload} />
                   </label>
 
                   {isDevMode && (
@@ -1016,7 +1245,7 @@ const App: React.FC = () => {
                       <div className="flex justify-between items-center text-lg">
                         <span className="text-slate-900 font-black">Total:</span>
                         <span className="text-blue-600 font-black text-2xl">
-                          {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? "GRÁTIS" : "R$ 24,90"}
+                          {isFreeGenerationAvailable ? "GRÁTIS" : PRICE_LABEL}
                         </span>
                       </div>
                     </div>
@@ -1046,7 +1275,7 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="space-y-4">
-                    {adminSettings.isFreeGenerationEnabled && adminSettings.freeGenerationsUsed < adminSettings.freeGenerationLimit ? (
+                    {isFreeGenerationAvailable ? (
                       <button
                         disabled={isProcessing}
                         onClick={async () => {
@@ -1060,7 +1289,7 @@ const App: React.FC = () => {
                               isFree: true
                             });
                             // Uso grátis é controlado no servidor
-                            await handleGenerateDocument();
+                            await handleGenerateDocument({ useFreeGeneration: true });
                           } catch (err: any) {
                             setError(err.message || "Erro ao gerar recurso grátis");
                             setIsProcessing(false);
@@ -1087,7 +1316,7 @@ const App: React.FC = () => {
                               customerPhone: personalData.phone,
                               ticketPlate: ticketInfo?.vehiclePlate,
                               ticketArticle: ticketInfo?.article,
-                              amount: 24.90
+                              amount: 39.90
                             });
 
                             const { url } = await redirectToKiwifyCheckout(personalData);
@@ -1124,7 +1353,7 @@ const App: React.FC = () => {
                     {isDevMode && (
                       <button
                         disabled={isProcessing}
-                        onClick={handleGenerateDocument}
+                        onClick={() => handleGenerateDocument()}
                         className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-lg transition-all flex items-center justify-center gap-2 mb-3 active:scale-95"
                       >
                         ⚡ GERAR RECURSO AGORA (MODO DEV - PULAR PAGAMENTO)
@@ -1178,7 +1407,19 @@ const App: React.FC = () => {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900">Recurso Concluído</h2>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(finalDocument);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 3000);
+                    }}
+                    className={`px-5 py-3 rounded-xl font-black flex items-center gap-2 transition-all ${copied ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                    title="Copiar texto do recurso para colar no site do DETRAN"
+                  >
+                    {copied ? <Check className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5 text-slate-600" />}
+                    <span>{copied ? 'COPIADO!' : 'COPIAR TEXTO'}</span>
+                  </button>
                   <button 
                     onClick={async () => {
                       try {
@@ -1504,6 +1745,116 @@ const App: React.FC = () => {
                 🔒 Seus dados estão protegidos sob a LGPD e criptografia de ponta a ponta.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Preenchimento Manual de Multa */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 md:p-8 animate-slideIn relative">
+            <button
+              onClick={() => setShowManualModal(false)}
+              className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-6">
+              <div className="bg-blue-50 text-blue-600 p-3 rounded-2xl">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Dados da Multa</h3>
+                <p className="text-xs text-slate-500">Informe os dados da sua notificação de autuação</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmitManualTicket} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Placa do Veículo *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={manualTicketForm.vehiclePlate}
+                  onChange={(e) => setManualTicketForm({ ...manualTicketForm, vehiclePlate: e.target.value })}
+                  placeholder="Ex: ABC-1D23"
+                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Infração / Motivo da Multa *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={manualTicketForm.article}
+                  onChange={(e) => setManualTicketForm({ ...manualTicketForm, article: e.target.value })}
+                  placeholder="Ex: Excesso de velocidade (Art. 218), Estacionamento proibido..."
+                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Data e Hora
+                  </label>
+                  <input
+                    type="text"
+                    value={manualTicketForm.date}
+                    onChange={(e) => setManualTicketForm({ ...manualTicketForm, date: e.target.value })}
+                    placeholder="Ex: 10/02/2026 14:30"
+                    className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Órgão Autuador
+                  </label>
+                  <input
+                    type="text"
+                    value={manualTicketForm.authority}
+                    onChange={(e) => setManualTicketForm({ ...manualTicketForm, authority: e.target.value })}
+                    placeholder="Ex: DETRAN, PRF, PREFEITURA"
+                    className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all uppercase"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Local da Infração
+                </label>
+                <input
+                  type="text"
+                  value={manualTicketForm.location}
+                  onChange={(e) => setManualTicketForm({ ...manualTicketForm, location: e.target.value })}
+                  placeholder="Ex: Av. Paulista, 1000 - São Paulo/SP"
+                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isAnalyzingManual || !manualTicketForm.vehiclePlate || !manualTicketForm.article}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-2xl font-black text-base flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 mt-4"
+              >
+                {isAnalyzingManual ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Analisando com IA...</span>
+                  </>
+                ) : (
+                  <span>GERAR DIAGNÓSTICO DO RECURSO</span>
+                )}
+              </button>
+            </form>
           </div>
         </div>
       )}

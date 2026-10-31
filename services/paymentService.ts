@@ -18,11 +18,21 @@ export const redirectToKiwifyCheckout = async (personalData: PersonalInfo): Prom
     return { url: checkoutUrl.toString() };
 };
 
-export const checkKiwifyPaymentStatus = async (email: string): Promise<string> => {
+export interface PaymentVerificationResult {
+    status: 'PAID' | 'PENDING' | 'ERROR';
+    message?: string;
+    isDev?: boolean;
+}
+
+export const checkKiwifyPaymentStatus = async (email: string): Promise<PaymentVerificationResult> => {
     const response = await fetch(`/auto-api/payment/verify/${encodeURIComponent(email)}`);
     if (!response.ok) {
-        throw new Error("Erro ao verificar pagamento");
+        throw new Error("Falha na comunicação com o servidor ao verificar pagamento.");
     }
     const result = await response.json();
-    return result.status;
+    return {
+        status: result.status,
+        message: result.message,
+        isDev: result.isDev
+    };
 };
