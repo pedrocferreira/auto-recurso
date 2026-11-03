@@ -47,23 +47,3 @@ export const sendCartRecoveryEmail = async (email: string, name: string, plate?:
     htmlContent: `<p>Olá ${name}, percebemos que você não terminou...</p>`
   });
 };
-
-export const sendPdfEmail = async (
-  email: string,
-  name: string,
-  documentContent: string,
-  subject?: string
-): Promise<boolean> => {
-  const response = await fetch('/auto-api/email/send-pdf', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      to: email,
-      name,
-      documentContent,
-      subject
-    })
-  });
-  if (!response.ok) throw new Error("Erro ao enviar PDF por email.");
-  return true;
-};

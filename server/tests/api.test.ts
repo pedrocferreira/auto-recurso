@@ -306,14 +306,28 @@ FULANO DE TAL`,
       expect(response.body).toHaveProperty('message');
     });
 
-    it('POST /auto-api/resource/recover deve retornar mensagem amigável quando nenhum recurso for encontrado', async () => {
-      const response = await request(app)
+    it('POST /auto-api/resource/recover deve responder igual exista ou não recurso, sem devolver dados', async () => {
+      const notFound = await request(app)
         .post('/auto-api/resource/recover')
         .send({ query: 'inexistente_99999@teste.com' });
+      // Placa do recurso gerado no teste de geração grátis
+      const found = await request(app)
+        .post('/auto-api/resource/recover')
+        .send({ query: 'ABC1D23' });
 
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(false);
-      expect(response.body).toHaveProperty('message');
+      expect(notFound.status).toBe(200);
+      expect(found.status).toBe(200);
+      expect(found.body).toEqual(notFound.body);
+      expect(found.body).not.toHaveProperty('resources');
+      expect(JSON.stringify(found.body)).not.toContain('111.222.333-44');
+    });
+
+    it('POST /auto-api/email/send-pdf não deve mais existir como rota pública', async () => {
+      const response = await request(app)
+        .post('/auto-api/email/send-pdf')
+        .send({ to: 'vitima@teste.com', name: 'X', documentContent: 'spam' });
+
+      expect(response.status).toBe(404);
     });
   });
 });

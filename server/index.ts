@@ -89,7 +89,23 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.use(cors());
+// Proxies confiáveis: por padrão só endereços de rede privada (nginx do container e o proxy do host).
+// Se houver Cloudflare ou outro proxy público na frente, ajuste TRUST_PROXY.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://autorecurso.online,https://www.autorecurso.online,https://app.autorecurso.online,https://autorecurso.xyz,https://www.autorecurso.xyz,https://app.autorecurso.xyz')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+app.use(cors({
+    origin: (origin, callback) => {
+        // Sem Origin = mesma origem via nginx, curl ou health check
+        if (!origin || process.env.APP_MODE === 'dev' || ALLOWED_ORIGINS.includes(origin)) {
+            return callback(null, true);
+        }
+        callback(null, false);
+    }
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Logging Middleware
@@ -132,17 +148,19 @@ async function generateWithModelFallback(getConfig: (modelName: string) => any, 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
 // --- Security: Rate Limiting ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+// Cada uso de rateLimit tem seu próprio contador, para uma rota não consumir o limite da outra.
+// O IP vem de req.ip, que respeita o 'trust proxy' configurado abaixo (não lê x-forwarded-for direto).
 function rateLimit(maxRequests: number, windowMs: number) {
+    const hits = new Map<string, { count: number; resetAt: number }>();
     return (req: Request, res: Response, next: NextFunction) => {
         if (process.env.NODE_ENV === 'test') {
             return next();
         }
-        const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
         const now = Date.now();
-        const record = rateLimitMap.get(ip);
+        const record = hits.get(ip);
         if (!record || now > record.resetAt) {
-            rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+            hits.set(ip, { count: 1, resetAt: now + windowMs });
             return next();
         }
         if (record.count >= maxRequests) {
@@ -151,6 +169,22 @@ function rateLimit(maxRequests: number, windowMs: number) {
         record.count++;
         next();
     };
+}
+
+// Limita quantos e-mails um mesmo endereço recebe numa janela, para as rotas públicas
+// não serem usadas para lotar a caixa de alguém.
+const emailSendLog = new Map<string, number[]>();
+function canSendEmailTo(email: string, maxPerWindow: number, windowMs: number): boolean {
+    const key = email.trim().toLowerCase();
+    const now = Date.now();
+    const recent = (emailSendLog.get(key) || []).filter(t => now - t < windowMs);
+    if (recent.length >= maxPerWindow) {
+        emailSendLog.set(key, recent);
+        return false;
+    }
+    recent.push(now);
+    emailSendLog.set(key, recent);
+    return true;
 }
 
 // --- Auth Middleware ---
@@ -184,7 +218,7 @@ app.get(['/health', '/auto-api/health'], (req, res) => {
     });
 });
 
-app.post('/auto-api/generate/analyze', async (req, res) => {
+app.post('/auto-api/generate/analyze', rateLimit(10, 10 * 60000), async (req, res) => {
     console.log('📥 [Analyze] Request received');
     try {
         let { base64Image, mimeType } = req.body;
@@ -258,7 +292,7 @@ app.post('/auto-api/generate/analyze', async (req, res) => {
     }
 });
 
-app.post('/auto-api/generate/analyze-text', async (req, res) => {
+app.post('/auto-api/generate/analyze-text', rateLimit(10, 10 * 60000), async (req, res) => {
     console.log('📥 [Analyze-Text] Manual ticket analysis request received');
     try {
         const { vehiclePlate, article, violationType, location, date, authority } = req.body;
@@ -336,7 +370,7 @@ Sugira 3 estratégias de defesa juridicamente embasadas no Código de Trânsito 
     }
 });
 
-app.post('/auto-api/generate/analyze-cnh', async (req, res) => {
+app.post('/auto-api/generate/analyze-cnh', rateLimit(10, 10 * 60000), async (req, res) => {
     try {
         let { base64Image, mimeType } = req.body;
 
@@ -492,6 +526,17 @@ IMPORTANTE: Retorne APENAS texto puro corrido. NÃO use formatação Markdown (s
         if (!appealText) {
             releaseClaim();
             return res.status(500).json({ error: 'A IA não retornou o texto do recurso. Tente novamente.' });
+        }
+
+        // Envia o PDF para o e-mail do cliente sem atrasar a resposta
+        const customerEmail = String(personalData.email || '').trim();
+        if (customerEmail.includes('@') && process.env.NODE_ENV !== 'test') {
+            sendAppealsByEmail(customerEmail, personalData.fullName || '', [{ content: appealText, plate: ticketInfo.vehiclePlate }])
+                .then(() => addEvent({ type: 'email_sent', data: { customerEmail, ticketPlate: ticketInfo.vehiclePlate } }))
+                .catch((err) => {
+                    console.error('❌ [PDF Email] Falha ao enviar recurso:', err);
+                    addEvent({ type: 'email_failed', data: { customerEmail, ticketPlate: ticketInfo.vehiclePlate, errorMessage: String(err?.message || err) } });
+                });
         }
 
         res.json({ appeal: appealText });
@@ -711,7 +756,9 @@ app.post('/auto-api/admin/register-resource', authMiddleware, (req, res) => {
     }
 });
 
-app.post('/auto-api/resource/recover', rateLimit(20, 60000), (req, res) => {
+// Recuperação: nunca devolve o recurso na resposta. Os documentos encontrados são enviados
+// apenas para o e-mail cadastrado na compra, e a resposta é a mesma exista ou não recurso.
+app.post('/auto-api/resource/recover', rateLimit(5, 10 * 60000), async (req, res) => {
     try {
         const { query } = req.body;
         if (!query || typeof query !== 'string' || !query.trim()) {
@@ -719,13 +766,37 @@ app.post('/auto-api/resource/recover', rateLimit(20, 60000), (req, res) => {
         }
 
         const result = searchCustomerResources(query);
-        return res.json(result);
+        if (!result.success && !('resources' in result) && result.message?.startsWith('Por favor')) {
+            return res.status(400).json({ success: false, message: result.message });
+        }
+
+        const byEmail = new Map<string, { name: string; appeals: { content: string; plate?: string }[] }>();
+        for (const r of (result as any).resources || []) {
+            const email = String(r.customerEmail || '').trim().toLowerCase();
+            if (!email.includes('@') || !r.documentContent) continue;
+            const entry = byEmail.get(email) || { name: r.customerName || '', appeals: [] as { content: string; plate?: string }[] };
+            entry.appeals.push({ content: r.documentContent, plate: r.ticketPlate });
+            byEmail.set(email, entry);
+        }
+
+        for (const [email, { name, appeals }] of byEmail) {
+            // No máximo 3 envios por hora para o mesmo e-mail
+            if (!canSendEmailTo(email, 3, 60 * 60000)) continue;
+            if (process.env.NODE_ENV === 'test') continue;
+            sendAppealsByEmail(email, name, appeals.slice(0, 10)).catch((err) =>
+                console.error('❌ [Recover Resource] Falha ao enviar e-mail:', err)
+            );
+        }
+
+        return res.json({
+            success: true,
+            message: 'Se houver recursos vinculados a esses dados, enviamos os documentos em PDF para o e-mail usado na compra. Confira também a caixa de spam.'
+        });
     } catch (error: any) {
         console.error('❌ [Recover Resource] Error:', error);
         res.status(500).json({ success: false, message: 'Erro ao buscar recurso no servidor.' });
     }
 });
-
 
 app.post('/auto-api/email/send', authMiddleware, async (req, res) => {
     try {
@@ -746,109 +817,113 @@ app.post('/auto-api/email/send', authMiddleware, async (req, res) => {
     }
 });
 
-// PDF Generation and Email with Attachment
-app.post('/auto-api/email/send-pdf', async (req, res) => {
-    console.log('📨 [PDF Email] Request received');
-    try {
-        const { to, name, documentContent, subject } = req.body;
+async function sendBrevoEmail(payload: any): Promise<any> {
+    const emailResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY || '',
+            'content-type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+    const emailResult: any = await emailResponse.json();
+    if (!emailResponse.ok) throw new Error(JSON.stringify(emailResult));
+    return emailResult;
+}
 
-        // Dynamic import of pdfkit
-        const PDFDocument = (await import('pdfkit')).default;
+async function buildAppealPdf(documentContent: string): Promise<Buffer> {
+    // Dynamic import of pdfkit
+    const PDFDocument = (await import('pdfkit')).default;
 
-        // Generate PDF in memory
-        const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
-            const doc = new PDFDocument({
-                size: 'A4',
-                margins: { top: 60, bottom: 60, left: 50, right: 50 }
-            });
-            const chunks: Buffer[] = [];
+    // Generate PDF in memory
+    return new Promise<Buffer>((resolve, reject) => {
+        const doc = new PDFDocument({
+            size: 'A4',
+            margins: { top: 60, bottom: 60, left: 50, right: 50 }
+        });
+        const chunks: Buffer[] = [];
 
-            doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-            doc.on('end', () => resolve(Buffer.concat(chunks)));
-            doc.on('error', reject);
+        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
 
-            // Header
-            doc.fontSize(20).font('Helvetica-Bold').text('RECURSO ADMINISTRATIVO', { align: 'center' });
-            doc.moveDown();
-            doc.fontSize(10).font('Helvetica').fillColor('#666').text('Gerado por AutoRecurso.online', { align: 'center' });
-            doc.moveDown(2);
+        // Header
+        doc.fontSize(20).font('Helvetica-Bold').text('RECURSO ADMINISTRATIVO', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(10).font('Helvetica').fillColor('#666').text('Gerado por AutoRecurso.online', { align: 'center' });
+        doc.moveDown(2);
 
-            // Document content (basic markdown-like parsing)
-            const lines = documentContent.split('\n');
-            lines.forEach((line: string) => {
-                if (line.startsWith('# ')) {
-                    doc.fontSize(16).font('Helvetica-Bold').fillColor('#000').text(line.substring(2));
-                    doc.moveDown();
-                } else if (line.startsWith('## ')) {
-                    doc.fontSize(14).font('Helvetica-Bold').fillColor('#000').text(line.substring(3));
-                    doc.moveDown(0.5);
-                } else if (line.startsWith('**') && line.endsWith('**')) {
-                    doc.fontSize(12).font('Helvetica-Bold').fillColor('#000').text(line.replace(/\*\*/g, ''));
-                } else if (line.trim() === '') {
-                    doc.moveDown(0.5);
-                } else {
-                    doc.fontSize(12).font('Helvetica').fillColor('#000').text(line, { align: 'justify' });
-                }
-            });
-
-            doc.end();
+        // Document content (basic markdown-like parsing)
+        const lines = documentContent.split('\n');
+        lines.forEach((line: string) => {
+            if (line.startsWith('# ')) {
+                doc.fontSize(16).font('Helvetica-Bold').fillColor('#000').text(line.substring(2));
+                doc.moveDown();
+            } else if (line.startsWith('## ')) {
+                doc.fontSize(14).font('Helvetica-Bold').fillColor('#000').text(line.substring(3));
+                doc.moveDown(0.5);
+            } else if (line.startsWith('**') && line.endsWith('**')) {
+                doc.fontSize(12).font('Helvetica-Bold').fillColor('#000').text(line.replace(/\*\*/g, ''));
+            } else if (line.trim() === '') {
+                doc.moveDown(0.5);
+            } else {
+                doc.fontSize(12).font('Helvetica').fillColor('#000').text(line, { align: 'justify' });
+            }
         });
 
-        console.log('📄 [PDF Email] PDF generated, size:', pdfBuffer.length, 'bytes');
+        doc.end();
+    });
+}
 
-        // Send email with attachment via Brevo
-        const emailPayload = {
-            sender: { name: 'AutoRecurso', email: 'recurso@autorecurso.online' },
-            to: [{ email: to, name: name }],
-            subject: subject || 'Seu Recurso de Trânsito - AutoRecurso',
-            htmlContent: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                    <h1 style="color: #1e40af;">Seu Recurso está Pronto! 🎉</h1>
-                    <p>Olá <strong>${escapeHtml(name || '')}</strong>,</p>
-                    <p>Seu recurso de trânsito foi gerado com sucesso e está anexado a este email em formato PDF.</p>
-                    <h3>Próximos Passos:</h3>
-                    <ol>
-                        <li>Imprima o documento anexo</li>
-                        <li>Assine nos locais indicados</li>
-                        <li>Protocole no DETRAN ou órgão competente</li>
-                        <li>Guarde o comprovante de protocolo</li>
-                    </ol>
-                    <p>Boa sorte com seu recurso!</p>
-                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                    <p style="color: #888; font-size: 12px;">AutoRecurso - Inteligência Artificial Jurídica</p>
-                </div>
-            `,
-            attachment: [{
-                content: pdfBuffer.toString('base64'),
-                name: 'Recurso_AutoRecurso.pdf'
-            }]
-        };
+// Envia o(s) recurso(s) em PDF para o e-mail do cliente. Só é chamado pelo servidor
+// (após gerar o recurso ou na recuperação), nunca com destinatário/conteúdo vindos do navegador.
+async function sendAppealsByEmail(to: string, name: string, appeals: { content: string; plate?: string }[]) {
+    const attachment = await Promise.all(appeals.map(async (appeal, i) => ({
+        content: (await buildAppealPdf(appeal.content)).toString('base64'),
+        name: `Recurso_${(appeal.plate || 'AutoRecurso').replace(/[^A-Za-z0-9]/g, '')}${appeals.length > 1 ? `_${i + 1}` : ''}.pdf`
+    })));
+    const plates = appeals.map(a => a.plate).filter(Boolean).join(', ');
 
-        const emailResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-                'accept': 'application/json',
-                'api-key': process.env.BREVO_API_KEY || '',
-                'content-type': 'application/json'
-            },
-            body: JSON.stringify(emailPayload)
-        });
+    await sendBrevoEmail({
+        sender: { name: 'AutoRecurso', email: 'recurso@autorecurso.online' },
+        to: [{ email: to, name: name || undefined }],
+        subject: plates ? `Seu Recurso de Trânsito - ${plates}` : 'Seu Recurso de Trânsito - AutoRecurso',
+        htmlContent: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #1e40af;">Seu Recurso está Pronto! 🎉</h1>
+                <p>Olá <strong>${escapeHtml(name || '')}</strong>,</p>
+                <p>${appeals.length > 1 ? 'Seus recursos de trânsito estão anexados' : 'Seu recurso de trânsito está anexado'} a este email em formato PDF.</p>
+                <h3>Próximos Passos:</h3>
+                <ol>
+                    <li>Imprima o documento anexo</li>
+                    <li>Assine nos locais indicados</li>
+                    <li>Protocole no DETRAN ou órgão competente</li>
+                    <li>Guarde o comprovante de protocolo</li>
+                </ol>
+                <p>Boa sorte com seu recurso!</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="color: #888; font-size: 12px;">AutoRecurso - Inteligência Artificial Jurídica</p>
+            </div>
+        `,
+        attachment
+    });
+    console.log(`✅ [PDF Email] ${appeals.length} recurso(s) enviado(s) para: ${to}`);
+}
 
-        const emailResult: any = await emailResponse.json();
-        if (!emailResponse.ok) throw new Error(JSON.stringify(emailResult));
-
-        console.log('✅ [PDF Email] Email sent successfully to:', to);
-        res.json({ success: true, messageId: emailResult.messageId });
-    } catch (error: any) {
-        console.error('❌ [PDF Email] Error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/auto-api/email/checkout', async (req, res) => {
+app.post('/auto-api/email/checkout', rateLimit(5, 10 * 60000), async (req, res) => {
     console.log('📨 [Checkout Email] Request received');
     try {
-        const { email, name, checkoutUrl } = req.body;
+        const { email, checkoutUrl } = req.body || {};
+        const name = String(req.body?.name || '').slice(0, 80);
+
+        if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+            return res.status(400).json({ success: false, error: 'E-mail inválido.' });
+        }
+        // Um lembrete de checkout por e-mail a cada hora
+        if (!canSendEmailTo(`checkout:${email}`, 1, 60 * 60000)) {
+            return res.json({ success: true, skipped: true });
+        }
 
         // Security: Validate checkout URL against allowed domains
         const safeCheckoutUrl = (checkoutUrl && isAllowedCheckoutUrl(checkoutUrl))
@@ -863,14 +938,14 @@ app.post('/auto-api/email/checkout', async (req, res) => {
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                     <h1 style="color: #1e40af;">Finalize seu Recurso de Trânsito</h1>
                     <p>Olá <strong>${escapeHtml(name || '')}</strong>,</p>
-                    <p>O seu recurso já foi elaborado pela nossa Inteligência Artificial com base nos dados e teses jurídicas selecionados, e está pronto para ser baixado!</p>
-                    <p>Para concluir o pagamento e liberar o documento imediatamente, clique no botão abaixo:</p>
+                    <p>Seus dados e a tese de defesa escolhida já estão salvos. Assim que o pagamento for confirmado, nossa Inteligência Artificial gera o seu recurso na hora.</p>
+                    <p>Para concluir o pagamento, clique no botão abaixo:</p>
                     <div style="text-align: center; margin: 30px 0;">
                         <a href="${escapeHtml(safeCheckoutUrl)}" style="background-color: #2563eb; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
                             Concluir Pagamento
                         </a>
                     </div>
-                    <p>Assim que o pagamento for confirmado, você poderá baixar seu Recurso em PDF pronto para assinar.</p>
+                    <p>Depois do pagamento, volte ao site e clique em "Já fiz o pagamento" para gerar e baixar seu recurso em PDF, pronto para assinar.</p>
                     <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                     <p style="color: #888; font-size: 12px;">AutoRecurso - Inteligência Artificial Jurídica</p>
                 </div>

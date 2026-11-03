@@ -92,18 +92,6 @@ export const logEvent = async (type: string, data: any = {}) => {
     }
 };
 
-export const registerResource = async (data: any) => {
-    try {
-        await fetch('/auto-api/admin/register-resource', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-    } catch (error) {
-        console.error('Failed to register resource to server:', error);
-    }
-};
-
 const getAuthHeaders = () => {
     const token = localStorage.getItem('adminToken');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -152,7 +140,7 @@ export const clearAllData = async () => {
     });
 };
 
-export const searchResources = async (query: string): Promise<{ success: boolean; resources?: any[]; message?: string; hasPendingPayment?: boolean }> => {
+export const searchResources = async (query: string): Promise<{ success: boolean; message?: string }> => {
     try {
         const response = await fetch('/auto-api/resource/recover', {
             method: 'POST',

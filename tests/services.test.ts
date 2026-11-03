@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analyzeManualTicket, analyzeTicketImage, analyzeCNHImage, generateFinalAppeal } from '../services/geminiService';
-import { logEvent, registerResource, searchResources } from '../services/analyticsService';
+import { logEvent, searchResources } from '../services/analyticsService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from '../services/paymentService';
-import { sendEmail, sendResourceEmail, sendPdfEmail } from '../services/emailService';
+import { sendEmail, sendResourceEmail } from '../services/emailService';
 
 describe('Frontend Services - Unit & Resilience Test Suite (QA Senior)', () => {
   beforeEach(() => {
@@ -139,12 +139,12 @@ describe('Frontend Services - Unit & Resilience Test Suite (QA Senior)', () => {
     it('searchResources deve retornar resultado estruturado', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ success: true, resources: [{ id: 'res-1', ticketPlate: 'ABC1234' }] })
+        json: async () => ({ success: true, message: 'Enviamos para o e-mail da compra.' })
       } as any);
 
       const result = await searchResources('cliente@email.com');
       expect(result.success).toBe(true);
-      expect(result.resources?.length).toBe(1);
+      expect(result.message).toBe('Enviamos para o e-mail da compra.');
     });
   });
 
@@ -216,14 +216,5 @@ describe('Frontend Services - Unit & Resilience Test Suite (QA Senior)', () => {
       expect(result).toBe(true);
     });
 
-    it('sendPdfEmail deve enviar PDF com sucesso', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ success: true }),
-      } as any);
-
-      const result = await sendPdfEmail('cliente@teste.com', 'Carlos', 'Conteudo do documento');
-      expect(result).toBe(true);
-    });
   });
 });

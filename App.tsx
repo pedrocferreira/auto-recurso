@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal, analyzeManualTicket } from './services/geminiService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
-import { logEvent, registerResource, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
-import { sendResourceEmail, sendPdfEmail } from './services/emailService';
+import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
 import {
@@ -92,10 +91,8 @@ const App: React.FC = () => {
   const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
   const [recoveryQuery, setRecoveryQuery] = useState<string>('');
   const [isRecovering, setIsRecovering] = useState<boolean>(false);
-  const [recoveryResults, setRecoveryResults] = useState<any[] | null>(null);
+  const [recoverySent, setRecoverySent] = useState<boolean>(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
-  const [resendingId, setResendingId] = useState<string | null>(null);
-  const [resendSuccessId, setResendSuccessId] = useState<string | null>(null);
 
   const [dataLoaded, setDataLoaded] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
@@ -251,11 +248,6 @@ const App: React.FC = () => {
     // In Dev Mode: automatically bypass and generate
     if (isDevMode) {
       logEvent('payment_completed', { email: paymentEmail || 'dev@teste.com', amount: 39.90, mode: 'dev' });
-      trackPurchaseConversion({
-        email: paymentEmail || 'dev@teste.com',
-        amount: 39.90,
-        ticketPlate: ticketInfo?.vehiclePlate
-      });
       await handleGenerateDocument();
       return;
     }
@@ -270,11 +262,7 @@ const App: React.FC = () => {
       const result = await checkKiwifyPaymentStatus(paymentEmail);
       if (result.status === 'PAID') {
         logEvent('payment_completed', { email: paymentEmail, amount: 39.90 });
-        trackPurchaseConversion({
-          email: paymentEmail,
-          amount: 39.90,
-          ticketPlate: personalData.ticketPlate || ticketInfo?.vehiclePlate
-        });
+        // A conversão é registrada só depois que o recurso é gerado (handleGenerateDocument)
         handleGenerateDocument();
       } else {
         logEvent('payment_failed', { email: paymentEmail, errorMessage: `Status: ${result.status}` });
@@ -349,103 +337,16 @@ const App: React.FC = () => {
     }
     setIsRecovering(true);
     setRecoveryMessage(null);
-    setRecoveryResults(null);
+    setRecoverySent(false);
     try {
       const res = await searchResources(query.trim());
-      if (res.success && res.resources && res.resources.length > 0) {
-        setRecoveryResults(res.resources);
-      } else {
-        setRecoveryMessage(res.message || "Nenhum recurso encontrado com estes dados.");
-      }
+      setRecoverySent(!!res.success);
+      setRecoveryMessage(res.message || "Não foi possível consultar agora. Tente novamente.");
     } catch (err) {
       console.error("Erro na busca de recuperação:", err);
       setRecoveryMessage("Erro ao consultar o servidor. Tente novamente.");
     } finally {
       setIsRecovering(false);
-    }
-  };
-
-  const handleOpenRecoveredDocument = (resource: any) => {
-    setFinalDocument(resource.documentContent || '');
-    setPersonalData(prev => ({
-      ...prev,
-      fullName: resource.customerName || prev.fullName,
-      email: resource.customerEmail || prev.email,
-      cpf: resource.customerCpf || prev.cpf,
-      phone: resource.customerPhone || prev.phone,
-      rg: resource.customerRg || prev.rg,
-      cnh: resource.customerCnh || prev.cnh,
-      address: resource.customerAddress || prev.address
-    }));
-    setTicketInfo(prev => ({
-      violationType: prev?.violationType || 'Infração de Trânsito',
-      article: resource.ticketArticle || prev?.article || '',
-      location: resource.ticketLocation || prev?.location || '',
-      date: resource.ticketDate || prev?.date || '',
-      vehiclePlate: resource.ticketPlate || prev?.vehiclePlate || '',
-      authority: prev?.authority || 'DETRAN',
-      strategies: prev?.strategies || []
-    }));
-    setStep(AppStep.FINAL_DOCUMENT);
-    setShowRecoveryModal(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDownloadDocxDirect = async (resource: any) => {
-    try {
-      const res = await fetch('/auto-api/generate/docx', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: resource.documentContent,
-          personalData: {
-            fullName: resource.customerName,
-            cpf: resource.customerCpf,
-            rg: resource.customerRg,
-            cnh: resource.customerCnh,
-            address: resource.customerAddress
-          },
-          ticketInfo: {
-            vehiclePlate: resource.ticketPlate,
-            article: resource.ticketArticle,
-            date: resource.ticketDate,
-            authority: 'DETRAN'
-          }
-        })
-      });
-      if (!res.ok) throw new Error('Erro ao gerar DOCX');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Recurso_${resource.ticketPlate || 'AutoRecurso'}.docx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Erro ao baixar DOCX:', err);
-      alert('Erro ao gerar o arquivo DOCX. Tente novamente.');
-    }
-  };
-
-  const handleResendPdfEmail = async (resource: any) => {
-    setResendingId(resource.id);
-    setResendSuccessId(null);
-    try {
-      await sendPdfEmail(
-        resource.customerEmail,
-        resource.customerName || 'Condutor',
-        resource.documentContent,
-        `Seu Recurso de Trânsito - ${resource.ticketPlate || 'AutoRecurso'}`
-      );
-      setResendSuccessId(resource.id);
-      setTimeout(() => setResendSuccessId(null), 5000);
-    } catch (err) {
-      console.error('Erro ao reenviar PDF:', err);
-      alert('Não foi possível reenviar o e-mail no momento. Tente novamente.');
-    } finally {
-      setResendingId(null);
     }
   };
 
@@ -461,7 +362,6 @@ const App: React.FC = () => {
         const targetQuery = emailParam || cpfParam || '';
         if (targetQuery) {
           setRecoveryQuery(targetQuery);
-          handleSearchRecovery(targetQuery);
         }
       }
 
@@ -624,65 +524,18 @@ const App: React.FC = () => {
         ticketArticle: currentTicketInfo.article
       });
 
-      // Register complete resource data
-      const strategy = currentTicketInfo.strategies.find(s => s.id === currentSelectedStrategy);
-      registerResource({
-        customerName: currentPersonalData.fullName,
-        customerEmail: currentPersonalData.email,
-        customerCpf: currentPersonalData.cpf,
-        customerPhone: currentPersonalData.phone,
-        customerRg: currentPersonalData.rg,
-        customerCnh: currentPersonalData.cnh,
-        customerAddress: currentPersonalData.address,
-        ticketPlate: currentTicketInfo.vehiclePlate,
-        ticketArticle: currentTicketInfo.article,
-        ticketLocation: currentTicketInfo.location,
-        ticketDate: currentTicketInfo.date,
-        strategy: strategy?.title,
-        documentContent: doc
-      });
-
-      // Send email with resource
-      try {
-        await sendResourceEmail(
-          currentPersonalData.email,
-          currentPersonalData.fullName,
-          doc,
-          currentTicketInfo.vehiclePlate
-        );
-        console.log('Email sent successfully to:', currentPersonalData.email);
-      } catch (emailError) {
-        console.error('Failed to send email:', emailError);
-        logEvent('email_failed', {
-          customerName: currentPersonalData.fullName,
-          customerEmail: currentPersonalData.email,
-          ticketPlate: currentTicketInfo.vehiclePlate,
-          errorMessage: emailError instanceof Error ? emailError.message : 'Erro desconhecido ao enviar email'
-        });
-        // Don't fail the entire flow if email fails
-      }
-
-      // Enviar PDF por email
-      try {
-        await sendPdfEmail(
-          currentPersonalData.email,
-          currentPersonalData.fullName,
-          doc,
-          `Seu Recurso de Trânsito - ${currentTicketInfo.vehiclePlate}`
-        );
-        console.log('PDF email sent successfully to:', currentPersonalData.email);
-      } catch (pdfEmailError) {
-        console.error('Failed to send PDF email:', pdfEmailError);
-        // Don't fail the entire flow if PDF email fails
-      }
+      // O servidor salva o recurso e envia o PDF por e-mail ao gerar
 
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
-      trackPurchaseConversion({
-        email: currentPersonalData.email,
-        amount: 39.90,
-        ticketPlate: currentTicketInfo.vehiclePlate
-      });
+      // Uma conversão por venda paga: não conta geração grátis nem modo dev
+      if (!options.useFreeGeneration && !isDevMode) {
+        trackPurchaseConversion({
+          email: currentPersonalData.email,
+          amount: 39.90,
+          ticketPlate: currentTicketInfo.vehiclePlate
+        });
+      }
       // Limpar localStorage após sucesso
       localStorage.removeItem('appStep');
       localStorage.removeItem('ticketInfo');
@@ -1570,7 +1423,7 @@ const App: React.FC = () => {
             <button
               onClick={() => {
                 setShowRecoveryModal(false);
-                setRecoveryResults(null);
+                setRecoverySent(false);
                 setRecoveryMessage(null);
               }}
               className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
@@ -1586,7 +1439,7 @@ const App: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-xl font-black text-slate-900">Recuperar Meu Recurso</h3>
-                <p className="text-xs text-slate-500">Localize seu recurso já pago por E-mail, CPF ou Placa</p>
+                <p className="text-xs text-slate-500">Enviamos seu recurso já pago para o e-mail usado na compra</p>
               </div>
             </div>
 
@@ -1620,122 +1473,34 @@ const App: React.FC = () => {
                   {isRecovering ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Buscando...</span>
+                      <span>Enviando...</span>
                     </>
                   ) : (
                     <>
                       <Search className="w-4 h-4" />
-                      <span>Buscar</span>
+                      <span>Enviar</span>
                     </>
                   )}
                 </button>
               </div>
             </form>
 
-            {/* Mensagem de Erro / Informação */}
+            {/* Resultado do envio */}
             {recoveryMessage && (
-              <div className="p-4 mb-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-3 animate-fadeIn">
-                <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className={`p-4 mb-6 rounded-2xl border text-sm flex items-start gap-3 animate-fadeIn ${
+                recoverySent ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                {recoverySent
+                  ? <Mail className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  : <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />}
                 <div>
                   <p className="font-semibold">{recoveryMessage}</p>
-                  <p className="text-xs text-amber-700 mt-1">
-                    💡 Dica: Se o pagamento foi realizado via PIX ou cartão há menos de 1 minuto, aguarde alguns instantes para a compensação e tente novamente.
-                  </p>
+                  {recoverySent && (
+                    <p className="text-xs text-emerald-700 mt-1">
+                      💡 Se o pagamento foi feito há poucos minutos e o recurso ainda não foi gerado, volte à tela de pagamento e clique em "Já fiz o pagamento".
+                    </p>
+                  )}
                 </div>
-              </div>
-            )}
-
-            {/* Resultados Encontrados */}
-            {recoveryResults && recoveryResults.length > 0 && (
-              <div className="space-y-4 mb-6">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
-                  {recoveryResults.length} recurso(s) encontrado(s):
-                </h4>
-                {recoveryResults.map((item: any) => (
-                  <div
-                    key={item.id}
-                    className="p-5 rounded-2xl border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-blue-300 hover:shadow-md transition-all space-y-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-black rounded-lg">
-                          🚗 {item.ticketPlate || 'PLACA N/D'}
-                        </span>
-                        {item.ticketArticle && (
-                          <span className="px-2.5 py-1 bg-slate-200 text-slate-800 text-xs font-bold rounded-lg">
-                            Art. {item.ticketArticle}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[11px] text-slate-400 font-medium">
-                        {item.generatedAt ? new Date(item.generatedAt).toLocaleString('pt-BR') : ''}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
-                      <div>
-                        <strong className="text-slate-800">Condutor / Requerente:</strong> {item.customerName || 'Não informado'}
-                      </div>
-                      <div>
-                        <strong className="text-slate-800">E-mail:</strong> {item.customerEmail || 'Não informado'}
-                      </div>
-                      {item.ticketLocation && (
-                        <div className="sm:col-span-2">
-                          <strong className="text-slate-800">Local:</strong> {item.ticketLocation}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Ações para o recurso */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
-                      <button
-                        onClick={() => handleOpenRecoveredDocument(item)}
-                        className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
-                        title="Abrir recurso no visualizador para leitura e impressão"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span>Visualizar</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleDownloadDocxDirect(item)}
-                        className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
-                        title="Baixar arquivo DOCX formatado para Word"
-                      >
-                        <Download className="w-4 h-4 text-slate-600" />
-                        <span>Baixar DOCX</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleResendPdfEmail(item)}
-                        disabled={resendingId === item.id}
-                        className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm border ${
-                          resendSuccessId === item.id
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                        }`}
-                        title="Enviar cópia em PDF para o e-mail do condutor"
-                      >
-                        {resendingId === item.id ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                            <span>Enviando...</span>
-                          </>
-                        ) : resendSuccessId === item.id ? (
-                          <>
-                            <Check className="w-4 h-4 text-emerald-600" />
-                            <span>PDF Enviado!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Mail className="w-4 h-4 text-slate-600" />
-                            <span>Enviar PDF</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
 
