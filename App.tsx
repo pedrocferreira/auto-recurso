@@ -5,6 +5,7 @@ import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/p
 import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
+import HeroVideo from './HeroVideo';
 import {
   Camera,
   Upload,
@@ -647,6 +648,8 @@ const App: React.FC = () => {
                 <p className="text-slate-500 text-lg max-w-xl mx-auto">
                   Nossa IA analisa o CTB em tempo real e gera defesas com mais de 90% de precisão técnica.
                 </p>
+
+                <HeroVideo />
 
                 {/* Preço acima da dobra: confirma o valor prometido no anúncio */}
                 <div className="mt-6 inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-4 px-6 py-4 bg-blue-50 border border-blue-200 rounded-2xl">
