@@ -2,10 +2,9 @@ import React, { useRef, useState } from 'react';
 import { Play } from 'lucide-react';
 import { logEvent } from './services/analyticsService';
 
-// Coloque os arquivos em public/video/ (veja public/video/LEIA-ME.txt).
+// Arquivos em public/video/: como-funciona.mp4 e poster.jpg (veja LEIA-ME.txt).
 // Se o arquivo não existir, a seção some sozinha e a LP continua normal.
 const VIDEO_MP4 = '/video/como-funciona.mp4';
-const VIDEO_WEBM = '/video/como-funciona.webm';
 const VIDEO_POSTER = '/video/poster.jpg';
 
 const HeroVideo: React.FC = () => {
@@ -38,11 +37,9 @@ const HeroVideo: React.FC = () => {
             setStarted(true);
           }}
           onEnded={() => logEvent('hero_video_complete', {})}
+          src={VIDEO_MP4}
           onError={() => setFailed(true)}
-        >
-          <source src={VIDEO_WEBM} type="video/webm" onError={() => {}} />
-          <source src={VIDEO_MP4} type="video/mp4" onError={() => setFailed(true)} />
-        </video>
+        />
         {!started && (
           <button
             type="button"
