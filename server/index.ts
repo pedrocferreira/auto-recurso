@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { activeAIProvider, generateAI, generateAIJson } from './ai.js';
 import jwt from 'jsonwebtoken';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle, Tab, TabStopType, TabStopPosition, Header, Footer, PageNumber, NumberFormat } from 'docx';
 import { Request, Response, NextFunction } from 'express';
@@ -15,7 +15,9 @@ dotenv.config();
 const port = process.env.PORT || 3001;
 console.log('--- Server Start Configuration ---');
 console.log('PORT:', port);
+console.log('OPENROUTER_API_KEY loaded:', !!process.env.OPENROUTER_API_KEY);
 console.log('GEMINI_API_KEY loaded:', !!process.env.GEMINI_API_KEY);
+console.log('AI provider:', activeAIProvider());
 console.log('KIWIFY_CLIENT_ID loaded:', !!process.env.KIWIFY_CLIENT_ID);
 console.log('KIWIFY_CLIENT_SECRET loaded:', !!process.env.KIWIFY_CLIENT_SECRET);
 console.log('KIWIFY_ACCOUNT_ID loaded:', !!process.env.KIWIFY_ACCOUNT_ID);
@@ -116,35 +118,6 @@ app.use((req, res, next) => {
 
 
 
-// --- Gemini Configuration ---
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const CANDIDATE_MODELS = [
-    process.env.GEMINI_MODEL,
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash'
-].filter(Boolean) as string[];
-
-async function generateWithModelFallback(getConfig: (modelName: string) => any, content: any) {
-    let lastError: any = null;
-    for (const modelName of CANDIDATE_MODELS) {
-        try {
-            console.log(`🤖 Calling Gemini with model: ${modelName}`);
-            const model = genAI.getGenerativeModel({
-                model: modelName,
-                ...getConfig(modelName)
-            });
-            const result = await model.generateContent(content);
-            const response = await result.response;
-            return response;
-        } catch (err: any) {
-            console.warn(`⚠️ [Gemini] Model ${modelName} failed (${err?.message || err}). Trying next candidate...`);
-            lastError = err;
-        }
-    }
-    throw lastError;
-}
-
 const JWT_SECRET = process.env.JWT_SECRET!;
 
 // --- Security: Rate Limiting ---
@@ -207,6 +180,42 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
     }
 };
 
+// --- Proteção de custo: rotas de IA liberadas antes do pagamento ---
+const ALLOWED_UPLOAD_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
+const AI_BUDGET_ERROR = 'AI_BUDGET_EXCEEDED';
+
+// Valida o arquivo antes de gastar token: tipo permitido, não vazio e dentro do tamanho máximo.
+function parseUpload(body: any): { data: string; mimeType: string } | { error: string } {
+    let { base64Image, mimeType } = body || {};
+    if (typeof base64Image !== 'string' || !base64Image) return { error: 'Arquivo não enviado.' };
+    if (base64Image.includes('base64,')) {
+        const matches = base64Image.match(/^data:(.+);base64,/);
+        if (matches && matches[1]) mimeType = matches[1];
+        base64Image = base64Image.split('base64,')[1] || '';
+    }
+    mimeType = String(mimeType || 'image/jpeg').toLowerCase();
+    if (!ALLOWED_UPLOAD_MIMES.includes(mimeType)) return { error: 'Tipo de arquivo não suportado. Envie uma foto (JPG, PNG, WEBP) ou um PDF.' };
+    if (!base64Image || !/^[A-Za-z0-9+/=\s]+$/.test(base64Image.slice(0, 1024))) return { error: 'Arquivo inválido.' };
+    if (Math.floor(base64Image.length * 0.75) > MAX_UPLOAD_BYTES) return { error: 'Arquivo muito grande. O limite é 7 MB.' };
+    return { data: base64Image, mimeType };
+}
+
+// Teto global de chamadas de IA gratuitas (análises) por dia. Se um atacante driblar o limite por IP,
+// o gasto total ainda fica limitado. Configurável por PRE_PAYMENT_AI_DAILY_LIMIT (padrão 300).
+let aiBudget = { day: '', used: 0 };
+function consumeAiBudget(): boolean {
+    const today = new Date().toISOString().slice(0, 10);
+    if (aiBudget.day !== today) aiBudget = { day: today, used: 0 };
+    const limit = Number(process.env.PRE_PAYMENT_AI_DAILY_LIMIT) || 300;
+    if (aiBudget.used >= limit) {
+        console.warn(`🚨 [AI Budget] Teto diário de ${limit} análises gratuitas atingido.`);
+        return false;
+    }
+    aiBudget.used++;
+    return true;
+}
+
 // --- Routes ---
 
 app.get(['/health', '/auto-api/health'], (req, res) => {
@@ -221,73 +230,55 @@ app.get(['/health', '/auto-api/health'], (req, res) => {
 app.post('/auto-api/generate/analyze', rateLimit(10, 10 * 60000), async (req, res) => {
     console.log('📥 [Analyze] Request received');
     try {
-        let { base64Image, mimeType } = req.body;
-        console.log('📷 [Analyze] Received file data length:', base64Image?.length, 'MimeType:', mimeType);
+        const upload = parseUpload(req.body);
+        if ('error' in upload) return res.status(400).json({ error: upload.error });
+        const { data: base64Image, mimeType } = upload;
+        if (!consumeAiBudget()) throw new Error(AI_BUDGET_ERROR);
 
-        // Remove data URL prefix if present & extract mimeType if provided in data URL
-        if (base64Image && base64Image.includes('base64,')) {
-            const matches = base64Image.match(/^data:(.+);base64,/);
-            if (matches && matches[1]) {
-                mimeType = matches[1];
-            }
-            console.log('✂️ [Analyze] Removing base64 prefix... Extracted MimeType:', mimeType);
-            base64Image = base64Image.split('base64,')[1];
-        }
-
-        if (!mimeType) {
-            mimeType = 'image/jpeg';
-        }
-
-        console.log(`🤖 [Analyze] Calling Gemini API with mimeType: ${mimeType}...`);
-        const response = await generateWithModelFallback(
-            () => ({
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: SchemaType.OBJECT,
+        console.log(`🤖 [Analyze] Chamando IA com mimeType: ${mimeType}...`);
+        const result = await generateAIJson({
+            schema: {
+                        type: 'object',
                         properties: {
-                            violationType: { type: SchemaType.STRING },
-                            article: { type: SchemaType.STRING },
-                            location: { type: SchemaType.STRING },
-                            date: { type: SchemaType.STRING },
-                            vehiclePlate: { type: SchemaType.STRING },
-                            authority: { type: SchemaType.STRING },
+                            violationType: { type: 'string' },
+                            article: { type: 'string' },
+                            location: { type: 'string' },
+                            date: { type: 'string' },
+                            vehiclePlate: { type: 'string' },
+                            authority: { type: 'string' },
                             extractedPersonalInfo: {
-                                type: SchemaType.OBJECT,
+                                type: 'object',
                                 properties: {
-                                    fullName: { type: SchemaType.STRING },
-                                    cpf: { type: SchemaType.STRING },
-                                    address: { type: SchemaType.STRING }
+                                    fullName: { type: 'string' },
+                                    cpf: { type: 'string' },
+                                    address: { type: 'string' }
                                 }
                             },
                             strategies: {
-                                type: SchemaType.ARRAY,
+                                type: 'array',
                                 items: {
-                                    type: SchemaType.OBJECT,
+                                    type: 'object',
                                     properties: {
-                                        id: { type: SchemaType.STRING },
-                                        title: { type: SchemaType.STRING },
-                                        description: { type: SchemaType.STRING }
+                                        id: { type: 'string' },
+                                        title: { type: 'string' },
+                                        description: { type: 'string' }
                                     },
                                     required: ["id", "title", "description"]
                                 }
                             }
                         },
                         required: ["violationType", "article", "location", "date", "vehiclePlate", "authority", "strategies"]
-                    }
-                }
-            }),
-            [
-                { inlineData: { mimeType: mimeType, data: base64Image } },
-                { text: "Analise este documento de multa de trânsito brasileira (imagem ou PDF). Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis. IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (\"\"). NUNCA retorne textos como \"Não visível\", \"N/A\" ou similares. Retorne os dados estritamente no formato JSON conforme o schema especificado." }
-            ]
-        );
+                    },
+            file: { mimeType, data: base64Image },
+            prompt: "Analise este documento de multa de trânsito brasileira (imagem ou PDF). Extraia as informações principais e sugira 3 estratégias de defesa baseadas no Código de Trânsito Brasileiro (CTB). TENTE TAMBÉM identificar dados do condutor/proprietário como Nome, CPF e Endereço se estiverem visíveis. IMPORTANTE: Se um dado não for encontrado ou for ilegível, retorne uma string VAZIA (\"\"). NUNCA retorne textos como \"Não visível\", \"N/A\" ou similares. Retorne os dados estritamente no formato JSON conforme o schema especificado."
+        });
 
-        console.log('✅ [Analyze] Gemini responded successfully');
-        res.json(JSON.parse(response.text()));
+        console.log('✅ [Analyze] IA respondeu com sucesso');
+        res.json(result);
     } catch (error: any) {
         console.error('❌ [Analyze] Error:', error);
         if (error.cause) console.error('❌ [Analyze] Cause:', error.cause);
+        if (error.message === AI_BUDGET_ERROR) return res.status(503).json({ error: 'Análise automática temporariamente indisponível. Preencha os dados da multa manualmente.' });
         res.status(500).json({ error: error.message, details: error.toString() });
     }
 });
@@ -296,50 +287,44 @@ app.post('/auto-api/generate/analyze-text', rateLimit(10, 10 * 60000), async (re
     console.log('📥 [Analyze-Text] Manual ticket analysis request received');
     try {
         const { vehiclePlate, article, violationType, location, date, authority } = req.body;
+        if (!consumeAiBudget()) throw new Error(AI_BUDGET_ERROR);
 
-        const response = await generateWithModelFallback(
-            () => ({
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: SchemaType.OBJECT,
+        const result = await generateAIJson({
+            schema: {
+                        type: 'object',
                         properties: {
-                            violationType: { type: SchemaType.STRING },
-                            article: { type: SchemaType.STRING },
-                            location: { type: SchemaType.STRING },
-                            date: { type: SchemaType.STRING },
-                            vehiclePlate: { type: SchemaType.STRING },
-                            authority: { type: SchemaType.STRING },
+                            violationType: { type: 'string' },
+                            article: { type: 'string' },
+                            location: { type: 'string' },
+                            date: { type: 'string' },
+                            vehiclePlate: { type: 'string' },
+                            authority: { type: 'string' },
                             strategies: {
-                                type: SchemaType.ARRAY,
+                                type: 'array',
                                 items: {
-                                    type: SchemaType.OBJECT,
+                                    type: 'object',
                                     properties: {
-                                        id: { type: SchemaType.STRING },
-                                        title: { type: SchemaType.STRING },
-                                        description: { type: SchemaType.STRING }
+                                        id: { type: 'string' },
+                                        title: { type: 'string' },
+                                        description: { type: 'string' }
                                     },
                                     required: ["id", "title", "description"]
                                 }
                             }
                         },
                         required: ["violationType", "article", "location", "date", "vehiclePlate", "authority", "strategies"]
-                    }
-                }
-            }),
-            [
-                { text: `O condutor inseriu manualmente os dados de uma multa de trânsito brasileira:
+                    },
+            prompt: `O condutor inseriu manualmente os dados de uma multa de trânsito brasileira:
 - Placa: ${vehiclePlate || 'Não informada'}
 - Infração/Artigo: ${article || violationType || 'Infração de trânsito'}
 - Data/Hora: ${date || 'Recente'}
 - Local: ${location || 'Não informado'}
 - Órgão autuador: ${authority || 'DETRAN'}
 
-Sugira 3 estratégias de defesa juridicamente embasadas no Código de Trânsito Brasileiro (CTB) e resoluções do CONTRAN específicas para este tipo de infração. Retorne o resultado em JSON.` }
-            ]
-        );
+Sugira 3 estratégias de defesa juridicamente embasadas no Código de Trânsito Brasileiro (CTB) e resoluções do CONTRAN específicas para este tipo de infração. Retorne o resultado em JSON.`
+        });
 
-        res.json(JSON.parse(response.text()));
+        res.json(result);
     } catch (error: any) {
         console.error('❌ [Analyze-Text] Error:', error);
         res.json({
@@ -372,45 +357,28 @@ Sugira 3 estratégias de defesa juridicamente embasadas no Código de Trânsito 
 
 app.post('/auto-api/generate/analyze-cnh', rateLimit(10, 10 * 60000), async (req, res) => {
     try {
-        let { base64Image, mimeType } = req.body;
+        const upload = parseUpload(req.body);
+        if ('error' in upload) return res.status(400).json({ error: upload.error });
+        const { data: base64Image, mimeType } = upload;
+        if (!consumeAiBudget()) throw new Error(AI_BUDGET_ERROR);
 
-        // Remove data URL prefix if present & extract mimeType
-        if (base64Image && base64Image.includes('base64,')) {
-            const matches = base64Image.match(/^data:(.+);base64,/);
-            if (matches && matches[1]) {
-                mimeType = matches[1];
-            }
-            base64Image = base64Image.split('base64,')[1];
-        }
-
-        if (!mimeType) {
-            mimeType = 'image/jpeg';
-        }
-
-        console.log(`🤖 [Analyze CNH] Calling Gemini API with mimeType: ${mimeType}...`);
-        const response = await generateWithModelFallback(
-            () => ({
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: SchemaType.OBJECT,
+        console.log(`🤖 [Analyze CNH] Chamando IA com mimeType: ${mimeType}...`);
+        const result = await generateAIJson({
+            schema: {
+                        type: 'object',
                         properties: {
-                            fullName: { type: SchemaType.STRING },
-                            cpf: { type: SchemaType.STRING },
-                            rg: { type: SchemaType.STRING },
-                            cnh: { type: SchemaType.STRING },
-                            address: { type: SchemaType.STRING }
+                            fullName: { type: 'string' },
+                            cpf: { type: 'string' },
+                            rg: { type: 'string' },
+                            cnh: { type: 'string' },
+                            address: { type: 'string' }
                         }
-                    }
-                }
-            }),
-            [
-                { inlineData: { mimeType: mimeType, data: base64Image } },
-                { text: "Extraia os dados desta CNH (Carteira Nacional de Habilitação) em foto ou PDF. Campos: Nome Completo, CPF, RG, Número da CNH e Endereço (se houver). IMPORTANTE: Se um dado não for encontrado, retorne uma string VAZIA (\"\"). Retorne estritamente em JSON." }
-            ]
-        );
+                    },
+            file: { mimeType, data: base64Image },
+            prompt: "Extraia os dados desta CNH (Carteira Nacional de Habilitação) em foto ou PDF. Campos: Nome Completo, CPF, RG, Número da CNH e Endereço (se houver). IMPORTANTE: Se um dado não for encontrado, retorne uma string VAZIA (\"\"). Retorne estritamente em JSON."
+        });
 
-        res.json(JSON.parse(response.text()));
+        res.json(result);
     } catch (error: any) {
         console.error('❌ [Analyze CNH] Error:', error);
         // Graceful fallback: permite que o usuário prossiga preenchendo manualmente sem travar
@@ -500,8 +468,7 @@ FORMATO DO RECURSO (texto corrido, SEM markdown):
 
 IMPORTANTE: Retorne APENAS texto puro corrido. NÃO use formatação Markdown (sem #, ##, **, etc). Use apenas quebras de linha e texto normal. O texto será convertido diretamente em um documento DOCX.`;
 
-        const response = await generateWithModelFallback(() => ({}), prompt);
-        const appealText = response.text();
+        const appealText = await generateAI({ prompt, label: 'Appeal', maxTokens: 12000 });
 
         // Auto-save generated resource to database for customer recovery
         if (appealText) {

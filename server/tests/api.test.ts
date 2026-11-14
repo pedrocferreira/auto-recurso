@@ -16,6 +16,9 @@ describe('Auto Recurso - API Integration Test Suite (QA Senior)', () => {
 
   beforeAll(() => {
     process.env.NODE_ENV = 'test';
+    // Testes nunca chamam o OpenRouter real: força o provedor Gemini, que é mockado abaixo
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test-key';
     validAdminToken = jwt.sign({ role: 'admin' }, jwtSecret, { expiresIn: '1h' });
 
     // Mock determinístico do Gemini para garantir velocidade e zero consumo de cota em testes
