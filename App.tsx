@@ -5,6 +5,7 @@ import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/p
 import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
+import TermsOfUse from './TermsOfUse';
 import HeroVideo from './HeroVideo';
 import {
   Camera,
@@ -87,6 +88,7 @@ const App: React.FC = () => {
   const [isPaying, setIsPaying] = useState<boolean>(false);
   const [adminSettings, setAdminSettings] = useState<any>({});
   const [showPrivacy, setShowPrivacy] = useState<boolean>(false);
+  const [showTerms, setShowTerms] = useState<boolean>(false);
 
   // Recovery modal state
   const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
@@ -573,6 +575,10 @@ const App: React.FC = () => {
     ));
 
   // Show Privacy Policy page if requested
+  if (showTerms) {
+    return <TermsOfUse onBack={() => setShowTerms(false)} />;
+  }
+
   if (showPrivacy) {
     return <PrivacyPolicy onBack={() => setShowPrivacy(false)} />;
   }
@@ -765,8 +771,8 @@ const App: React.FC = () => {
 
               {/* Trust Badges */}
               <div className="mt-6 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-bold uppercase tracking-widest">
-                <span className="flex items-center gap-2"><Lock className="w-4 h-4 text-green-500" /> Dados Criptografados</span>
-                <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-green-500" /> LGPD Compliant</span>
+                <span className="flex items-center gap-2"><Lock className="w-4 h-4 text-green-500" /> Conexão Segura (TLS)</span>
+                <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-green-500" /> Pagamento Seguro (Kiwify)</span>
               </div>
             </div>
           )}
@@ -1110,7 +1116,7 @@ const App: React.FC = () => {
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-3 p-4 bg-green-50 rounded-xl border border-green-100">
                       <ShieldCheck className="w-5 h-5 text-green-600" />
-                      <span className="text-sm font-bold text-green-800 font-medium">Garantia de conformidade com o CTB</span>
+                      <span className="text-sm font-bold text-green-800 font-medium">Fundamentado no Código de Trânsito Brasileiro</span>
                     </div>
                     <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
                       <Zap className="w-5 h-5 text-blue-600" />
@@ -1204,6 +1210,14 @@ const App: React.FC = () => {
                         {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "PAGAR AGORA"}
                       </button>
                     )}
+
+                    <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+                      Ao continuar, você concorda com os{' '}
+                      <button type="button" onClick={() => setShowTerms(true)} className="underline hover:text-white">Termos de Uso e Reembolso</button>
+                      {' '}e a{' '}
+                      <button type="button" onClick={() => setShowPrivacy(true)} className="underline hover:text-white">Política de Privacidade</button>.
+                      O recurso é gerado por IA e não garante o cancelamento da multa.
+                    </p>
 
                     {/* Dev Mode Instant Generator */}
                     {isDevMode && (
@@ -1510,7 +1524,7 @@ const App: React.FC = () => {
             {/* Rodapé informativo */}
             <div className="mt-4 pt-4 border-t border-slate-100 text-center">
               <p className="text-[11px] text-slate-400">
-                🔒 Seus dados estão protegidos sob a LGPD e criptografia de ponta a ponta.
+                🔒 Seus dados trafegam por conexão segura (TLS) e são tratados conforme nossa Política de Privacidade.
               </p>
             </div>
           </div>
@@ -1635,6 +1649,13 @@ const App: React.FC = () => {
           className="mt-2 underline hover:text-blue-600 transition-colors"
         >
           Política de Privacidade
+        </button>
+        <span className="mx-2">·</span>
+        <button
+          onClick={() => setShowTerms(true)}
+          className="mt-2 underline hover:text-blue-600 transition-colors"
+        >
+          Termos de Uso e Reembolso
         </button>
       </footer>
     </div>

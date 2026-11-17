@@ -24,7 +24,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                         </div>
                         <div>
                             <h1 className="text-3xl font-black text-slate-900">Política de Privacidade</h1>
-                            <p className="text-slate-500 text-sm">Última atualização: Janeiro de 2026</p>
+                            <p className="text-slate-500 text-sm">Última atualização: 17 de novembro de 2026</p>
                         </div>
                     </div>
 
@@ -44,7 +44,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                                 <li><strong>Dados do Veículo:</strong> Placa, informações do auto de infração.</li>
                                 <li><strong>Imagens:</strong> Fotos do auto de infração ou CNH enviadas para análise.</li>
                                 <li><strong>Dados de Pagamento:</strong> Processados exclusivamente pela Kiwify. Não armazenamos dados de cartão.</li>
-                                <li><strong>Dados de Uso:</strong> Logs de acesso, eventos de navegação e interações com a plataforma.</li>
+                                <li><strong>Dados de Uso:</strong> Logs de acesso, eventos de navegação e interações com a plataforma, inclusive por ferramentas de mensuração de campanhas do Google (Google Ads/Tag).</li>
                             </ul>
                         </Section>
 
@@ -66,9 +66,11 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                             title="3. Segurança dos Dados"
                         >
                             <p className="text-slate-600">
-                                Utilizamos criptografia TLS/SSL em todas as comunicações. Seus dados são armazenados em servidores
-                                seguros com acesso restrito. As imagens enviadas são processadas pela API do Google Gemini e não
-                                são armazenadas após a análise.
+                                Utilizamos criptografia TLS/SSL (conexão segura) em todas as comunicações. Seus dados são armazenados em
+                                servidores com acesso restrito. As fotos e PDFs enviados (auto de infração e CNH) são enviados a provedores
+                                de inteligência artificial apenas para extrair as informações, e a Plataforma não os guarda após a análise.
+                                Os dados que você informa e o recurso gerado ficam armazenados para que você possa recuperar o documento,
+                                e podem ser excluídos a seu pedido (veja o item 5).
                             </p>
                         </Section>
 
@@ -78,10 +80,20 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                         >
                             <p className="text-slate-600 mb-4">Compartilhamos seus dados apenas com:</p>
                             <ul className="list-disc pl-5 space-y-2 text-slate-600">
-                                <li><strong>Google Gemini:</strong> Para análise de imagens e geração de texto (IA).</li>
+                                <li><strong>OpenRouter e Google (Gemini):</strong> Para análise de imagens e geração de texto por inteligência artificial. O OpenRouter intermedeia o acesso aos modelos de IA, e o texto e as imagens enviados são processados pelo provedor do modelo (atualmente o Google).</li>
                                 <li><strong>Kiwify:</strong> Para processamento de pagamentos.</li>
                                 <li><strong>Brevo (Sendinblue):</strong> Para envio de e-mails transacionais.</li>
+                                <li><strong>Google (Ads/Tag):</strong> Para medir o desempenho de campanhas de divulgação.</li>
                             </ul>
+                            <p className="text-slate-600 mt-4">
+                                <strong>Transferência internacional de dados:</strong> o OpenRouter, o Google, a Brevo e a Kiwify podem
+                                tratar dados em servidores localizados fora do Brasil, como nos Estados Unidos e na Europa. Esse envio é
+                                necessário para a prestação do serviço (análise do documento e geração do recurso por IA) e ocorre
+                                com base no art. 33 da LGPD. Ao enviar seus documentos e dados, você declara estar ciente dessa transferência.
+                            </p>
+                            <p className="text-slate-600 mt-4">
+                                Não vendemos seus dados e não os usamos para treinar modelos de IA próprios.
+                            </p>
                         </Section>
 
                         <Section
