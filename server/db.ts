@@ -21,6 +21,8 @@ export const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('busy_timeout = 5000');
+// Sobrescreve com zeros o conteúdo apagado (dados pessoais não ficam recuperáveis no arquivo do banco)
+db.pragma('secure_delete = ON');
 
 // Criação das tabelas
 export function initDatabase() {
@@ -427,4 +429,80 @@ export const getAdminSnapshot = () => {
     abandonedCarts: [],
     settings
   };
+};
+
+
+// --- Retenção de dados (LGPD) ---
+const DAY_MS = 24 * 60 * 60 * 1000;
+const envDays = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+export const RETENTION = {
+  // Recursos gerados (nome, CPF, CNH, endereço e o texto do recurso)
+  resourceDays: () => envDays('RESOURCE_RETENTION_DAYS', 90),
+  // Carrinhos abandonados (nome, e-mail, telefone)
+  abandonedCartDays: () => envDays('ABANDONED_CART_RETENTION_DAYS', 30),
+  // Dados pessoais dentro dos eventos de analytics (a contagem do evento é mantida)
+  eventPiiDays: () => envDays('EVENT_PII_RETENTION_DAYS', 90),
+  // E-mail guardado junto da venda consumida (o id da venda é mantido para impedir reuso)
+  saleEmailDays: () => envDays('SALE_EMAIL_RETENTION_DAYS', 90),
+};
+
+// Campos de dados pessoais que o front grava nos eventos
+const EVENT_PII_KEYS = ['customerName', 'customerEmail', 'customerCpf', 'customerPhone', 'ticketPlate', 'name', 'email', 'phone', 'cpf', 'plate'];
+
+export interface PurgeResult {
+  resources: number;
+  abandonedCarts: number;
+  eventsAnonymized: number;
+  saleEmailsCleared: number;
+}
+
+/** Apaga ou anonimiza os dados pessoais que passaram do prazo de retenção. */
+export const purgeExpiredData = (now: number = Date.now()): PurgeResult => {
+  const result: PurgeResult = { resources: 0, abandonedCarts: 0, eventsAnonymized: 0, saleEmailsCleared: 0 };
+
+  const tx = db.transaction(() => {
+    result.resources = db
+      .prepare('DELETE FROM resources WHERE generated_at < ?')
+      .run(now - RETENTION.resourceDays() * DAY_MS).changes;
+
+    result.abandonedCarts = db
+      .prepare('DELETE FROM abandoned_carts WHERE created_at < ?')
+      .run(now - RETENTION.abandonedCartDays() * DAY_MS).changes;
+
+    result.saleEmailsCleared = db
+      .prepare("UPDATE consumed_sales SET email = '' WHERE consumed_at < ? AND email != ''")
+      .run(now - RETENTION.saleEmailDays() * DAY_MS).changes;
+
+    const eventCutoff = now - RETENTION.eventPiiDays() * DAY_MS;
+    const likeClause = EVENT_PII_KEYS.map(() => 'data LIKE ?').join(' OR ');
+    const rows = db
+      .prepare(`SELECT id, data FROM events WHERE timestamp < ? AND (${likeClause})`)
+      .all(eventCutoff, ...EVENT_PII_KEYS.map(k => `%"${k}"%`)) as { id: string; data: string }[];
+    const update = db.prepare('UPDATE events SET data = ? WHERE id = ?');
+    for (const row of rows) {
+      let parsed: any;
+      try { parsed = JSON.parse(row.data); } catch { continue; }
+      if (!parsed || typeof parsed !== 'object') continue;
+      let changed = false;
+      for (const key of EVENT_PII_KEYS) {
+        if (key in parsed) { delete parsed[key]; changed = true; }
+      }
+      if (changed) {
+        update.run(JSON.stringify(parsed), row.id);
+        result.eventsAnonymized++;
+      }
+    }
+  });
+  tx();
+
+  const total = result.resources + result.abandonedCarts + result.eventsAnonymized + result.saleEmailsCleared;
+  if (total > 0) {
+    // Descarta do arquivo -wal o que acabou de ser apagado
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* ignora */ }
+  }
+  return result;
 };

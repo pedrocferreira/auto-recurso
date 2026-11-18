@@ -9,7 +9,7 @@ import { activeAIProvider, generateAI, generateAIJson } from './ai.js';
 import jwt from 'jsonwebtoken';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle, Tab, TabStopType, TabStopPosition, Header, Footer, PageNumber, NumberFormat } from 'docx';
 import { Request, Response, NextFunction } from 'express';
-import { addEvent, addResource, claimFreeGeneration, claimSale, clearAllData, getAdminSnapshot, getSettings, isSaleConsumed, releaseFreeGeneration, releaseSale, searchCustomerResources, updateSettings } from './db.js';
+import { addEvent, addResource, purgeExpiredData, claimFreeGeneration, claimSale, clearAllData, getAdminSnapshot, getSettings, isSaleConsumed, releaseFreeGeneration, releaseSale, searchCustomerResources, updateSettings } from './db.js';
 
 dotenv.config();
 const port = process.env.PORT || 3001;
@@ -1201,6 +1201,18 @@ if (process.env.NODE_ENV !== 'test') {
     app.listen(port, () => {
         console.log(`Backend running at http://localhost:${port}`);
     });
+
+    // Retenção de dados (LGPD): limpa dados pessoais vencidos ao iniciar e uma vez por dia
+    const runRetention = () => {
+        try {
+            const r = purgeExpiredData();
+            console.log(`🧹 [Retenção] recursos apagados: ${r.resources}, carrinhos: ${r.abandonedCarts}, eventos anonimizados: ${r.eventsAnonymized}, e-mails de vendas limpos: ${r.saleEmailsCleared}`);
+        } catch (err) {
+            console.error('❌ [Retenção] Falha ao limpar dados vencidos:', err);
+        }
+    };
+    runRetention();
+    setInterval(runRetention, 24 * 60 * 60 * 1000).unref();
 }
 
 export default app;

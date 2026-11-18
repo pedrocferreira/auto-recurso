@@ -24,7 +24,7 @@ const TermsOfUse: React.FC<TermsOfUseProps> = ({ onBack }) => {
                         </div>
                         <div>
                             <h1 className="text-3xl font-black text-slate-900">Termos de Uso e Política de Reembolso</h1>
-                            <p className="text-slate-500 text-sm">Última atualização: 17 de novembro de 2026</p>
+                            <p className="text-slate-500 text-sm">Última atualização: 18 de novembro de 2026</p>
                         </div>
                     </div>
 
@@ -76,7 +76,7 @@ const TermsOfUse: React.FC<TermsOfUseProps> = ({ onBack }) => {
                                 <li>A análise inicial da multa e a sugestão de estratégias de defesa podem ser feitas antes do pagamento.</li>
                                 <li>O pagamento é processado pela Kiwify. A AutoRecurso não recebe nem armazena dados de cartão.</li>
                                 <li>Cada pagamento confirmado dá direito à geração de <strong>um (1) recurso</strong>. Para outra multa, é necessário um novo pagamento.</li>
-                                <li>O documento é gerado logo após a confirmação do pagamento, exibido na tela e enviado ao e-mail informado. Você pode recuperá-lo depois pela opção "Recuperar meu recurso".</li>
+                                <li>O documento é gerado logo após a confirmação do pagamento, exibido na tela e enviado ao e-mail informado. Você pode recuperá-lo depois pela opção "Recuperar meu recurso" em até <strong>90 dias</strong> após a geração, quando seus dados são apagados. Salve o arquivo assim que o receber.</li>
                                 <li>Se a geração falhar por erro técnico nosso, você poderá tentar novamente sem novo pagamento.</li>
                             </ul>
                         </Section>

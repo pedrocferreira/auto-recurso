@@ -24,7 +24,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                         </div>
                         <div>
                             <h1 className="text-3xl font-black text-slate-900">Política de Privacidade</h1>
-                            <p className="text-slate-500 text-sm">Última atualização: 17 de novembro de 2026</p>
+                            <p className="text-slate-500 text-sm">Última atualização: 18 de novembro de 2026</p>
                         </div>
                     </div>
 
@@ -69,8 +69,21 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                                 Utilizamos criptografia TLS/SSL (conexão segura) em todas as comunicações. Seus dados são armazenados em
                                 servidores com acesso restrito. As fotos e PDFs enviados (auto de infração e CNH) são enviados a provedores
                                 de inteligência artificial apenas para extrair as informações, e a Plataforma não os guarda após a análise.
-                                Os dados que você informa e o recurso gerado ficam armazenados para que você possa recuperar o documento,
-                                e podem ser excluídos a seu pedido (veja o item 5).
+                                Os dados que você informa e o recurso gerado ficam armazenados para que você possa recuperar o documento.
+                            </p>
+                            <p className="text-slate-600 mt-4">
+                                <strong>Por quanto tempo guardamos seus dados:</strong>
+                            </p>
+                            <ul className="list-disc pl-5 space-y-2 text-slate-600 mt-2">
+                                <li><strong>Recurso gerado e dados de identificação</strong> (nome, CPF, RG, CNH, endereço, e-mail e telefone): por <strong>90 dias</strong> após a geração. Depois disso, são apagados automaticamente e não será mais possível recuperar o documento. Por isso, salve o arquivo assim que o receber.</li>
+                                <li><strong>Dados de cadastro de compras não concluídas:</strong> até 30 dias.</li>
+                                <li><strong>Registros de uso e navegação:</strong> os dados pessoais deles são removidos após 90 dias, e mantemos apenas estatísticas sem identificação.</li>
+                                <li><strong>E-mail ligado a uma venda:</strong> removido após 90 dias. Mantemos apenas o código da venda, para impedir que o mesmo pagamento seja usado duas vezes.</li>
+                                <li><strong>Cópias de segurança:</strong> mantidas por até 14 dias, então o que é apagado some também delas em até 14 dias.</li>
+                                <li><strong>Pagamentos:</strong> a Kiwify pode guardar os registros da transação pelo prazo exigido por obrigações legais e fiscais, conforme a política dela.</li>
+                            </ul>
+                            <p className="text-slate-600 mt-4">
+                                Você também pode pedir a exclusão antecipada dos seus dados a qualquer momento (veja o item 5).
                             </p>
                         </Section>
 
