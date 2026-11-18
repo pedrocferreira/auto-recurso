@@ -20,10 +20,17 @@ vi.mock('../ai.js', () => ({
 }));
 
 // Kiwify simulada: por padrão nenhuma venda; o teste pode injetar vendas.
-const kiwify = vi.hoisted(() => ({ sales: [] as any[] }));
+const kiwify = vi.hoisted(() => ({ sales: [] as any[], pages: null as any[][] | null, calls: 0 }));
+const PROD = 'c174b730-9a7c-11f1-bbcf-25eb95ac5a9e';
 vi.mock('node-fetch', () => ({
     default: async (url: string) => {
-        const body = String(url).includes('oauth/token') ? { access_token: 'tok' } : { data: kiwify.sales };
+        let body: any;
+        if (String(url).includes('oauth/token')) body = { access_token: 'tok' };
+        else {
+            kiwify.calls++;
+            const page = Number(new URL(String(url)).searchParams.get('page_number') || 1);
+            body = { data: kiwify.pages ? (kiwify.pages[page - 1] || []) : kiwify.sales };
+        }
         return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
     },
 }));
@@ -48,6 +55,8 @@ beforeEach(() => {
     ai.calls = 0;
     ai.fail = false;
     kiwify.sales = [];
+    kiwify.pages = null;
+    kiwify.calls = 0;
     updateSettings({ isFreeGenerationEnabled: false, freeGenerationLimit: 0, freeGenerationsUsed: 0 });
 });
 
@@ -180,16 +189,36 @@ describe('Geração do recurso (appeal): só com pagamento ou cota grátis', () 
         expect(ai.calls).toBe(0);
     });
     it('venda pendente (não paga): 402 e nenhuma chamada à IA', async () => {
-        kiwify.sales = [{ id: 'v-pend', status: 'waiting_payment', customer: { email: 'comprador@teste.com' } }];
+        kiwify.sales = [{ id: 'v-pend', product: { id: PROD }, status: 'waiting_payment', customer: { email: 'comprador@teste.com' } }];
         const res = await request(app).post('/auto-api/generate/appeal').send(appealBody());
         expect(res.status).toBe(402);
         expect(ai.calls).toBe(0);
     });
     it('venda de OUTRO e-mail não libera a geração', async () => {
-        kiwify.sales = [{ id: 'v-outro', status: 'paid', customer: { email: 'outro@teste.com' } }];
+        kiwify.sales = [{ id: 'v-outro', product: { id: PROD }, status: 'paid', customer: { email: 'outro@teste.com' } }];
         const res = await request(app).post('/auto-api/generate/appeal').send(appealBody());
         expect(res.status).toBe(402);
         expect(ai.calls).toBe(0);
+    });
+    it('venda paga de OUTRO produto da conta Kiwify (ex.: ConverTrack) não libera o recurso', async () => {
+        kiwify.sales = [{ id: `v-outro-prod-${Date.now()}`, product: { id: '0bf41f50-d33d-11f1-ae3f-8f198841ce28', name: 'ConverTrack Starter' }, status: 'paid', customer: { email: 'comprador@teste.com' } }];
+        const res = await request(app).post('/auto-api/generate/appeal').send(appealBody());
+        expect(res.status).toBe(402);
+        expect(ai.calls).toBe(0);
+    });
+    it('venda sem produto informado é ignorada (falha fechada)', async () => {
+        kiwify.sales = [{ id: `v-sem-prod-${Date.now()}`, status: 'paid', customer: { email: 'comprador@teste.com' } }];
+        const res = await request(app).post('/auto-api/generate/appeal').send(appealBody());
+        expect(res.status).toBe(402);
+        expect(ai.calls).toBe(0);
+    });
+    it('encontra a compra do AutoRecurso mesmo quando ela está na 2ª página de vendas', async () => {
+        const filler = Array.from({ length: 100 }, (_, i) => ({ id: `fill-${i}`, product: { id: 'outro' }, status: 'paid', customer: { email: `x${i}@teste.com` } }));
+        kiwify.pages = [filler, [{ id: `v-pag2-${Date.now()}`, product: { id: PROD }, status: 'paid', customer: { email: 'comprador@teste.com' } }]];
+        const res = await request(app).post('/auto-api/generate/appeal').send(appealBody());
+        expect(res.status).toBe(200);
+        expect(ai.calls).toBe(1);
+        expect(kiwify.calls).toBe(2);
     });
     it('campos que tentam burlar (paid, isPaid, APP_MODE, saleId) são ignorados', async () => {
         const res = await request(app).post('/auto-api/generate/appeal')
@@ -207,14 +236,14 @@ describe('Geração do recurso (appeal): só com pagamento ou cota grátis', () 
         expect(getSettings().freeGenerationsUsed).toBe(1);
     });
     it('10 requisições simultâneas com a mesma venda paga geram só 1 vez', async () => {
-        kiwify.sales = [{ id: `v-paga-1-${Date.now()}`, status: 'paid', customer: { email: 'comprador@teste.com' } }];
+        kiwify.sales = [{ id: `v-paga-1-${Date.now()}`, product: { id: PROD }, status: 'paid', customer: { email: 'comprador@teste.com' } }];
         const results = await Promise.all(Array.from({ length: 10 }, () =>
             request(app).post('/auto-api/generate/appeal').send(appealBody())));
         expect(results.filter(r => r.status === 200).length).toBe(1);
         expect(ai.calls).toBe(1);
     });
     it('a mesma venda não gera um segundo recurso depois', async () => {
-        kiwify.sales = [{ id: `v-paga-2-${Date.now()}`, status: 'paid', customer: { email: 'comprador@teste.com' } }];
+        kiwify.sales = [{ id: `v-paga-2-${Date.now()}`, product: { id: PROD }, status: 'paid', customer: { email: 'comprador@teste.com' } }];
         const a = await request(app).post('/auto-api/generate/appeal').send(appealBody());
         const b = await request(app).post('/auto-api/generate/appeal').send(appealBody());
         expect(a.status).toBe(200);

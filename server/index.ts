@@ -532,6 +532,9 @@ type KiwifyPaymentCheck = {
 
 // Consulta as vendas dos últimos 5 dias na Kiwify e retorna a venda paga mais recente
 // que ainda não foi usada para gerar um recurso.
+// Id do produto "AutoRecurso" na Kiwify (pode ser trocado por KIWIFY_PRODUCT_ID).
+const KIWIFY_PRODUCT_ID_DEFAULT = 'c174b730-9a7c-11f1-bbcf-25eb95ac5a9e';
+
 async function checkKiwifyPayment(rawEmail: string): Promise<KiwifyPaymentCheck> {
     const token = await getKiwifyToken();
     const accountId = process.env.KIWIFY_ACCOUNT_ID || '';
@@ -541,28 +544,40 @@ async function checkKiwifyPayment(rawEmail: string): Promise<KiwifyPaymentCheck>
     today.setDate(today.getDate() - 5);
     const startDateStr = today.toISOString().split('T')[0] + ' 00:00';
 
-    const salesUrl = `https://public-api.kiwify.com/v1/sales?start_date=${encodeURIComponent(startDateStr)}&end_date=${encodeURIComponent(endDateStr)}`;
-    const response = await fetch(salesUrl, {
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-kiwify-account-id': accountId
+    // A conta Kiwify é compartilhada com outros produtos (ConverTrack etc.): só vale venda do AutoRecurso.
+    const productId = process.env.KIWIFY_PRODUCT_ID || KIWIFY_PRODUCT_ID_DEFAULT;
+
+    // A API devolve poucas vendas por página (padrão 10): percorre todas, senão uma compra pode ficar de fora.
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 20;
+    const sales: any[] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+        const salesUrl = `https://public-api.kiwify.com/v1/sales?start_date=${encodeURIComponent(startDateStr)}&end_date=${encodeURIComponent(endDateStr)}&page_size=${PAGE_SIZE}&page_number=${page}`;
+        const response = await fetch(salesUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'x-kiwify-account-id': accountId
+            }
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error('❌ [Kiwify] Sales API error:', response.status, errText);
+            return {
+                status: 'ERROR',
+                message: 'Falha na comunicação com o gateway de pagamentos. Tente novamente em instantes.'
+            };
         }
-    });
 
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error('❌ [Kiwify] Sales API error:', response.status, errText);
-        return {
-            status: 'ERROR',
-            message: 'Falha na comunicação com o gateway de pagamentos. Tente novamente em instantes.'
-        };
+        const data = (await response.json()) as any;
+        const pageSales: any[] = data.data || [];
+        sales.push(...pageSales);
+        if (pageSales.length < PAGE_SIZE) break;
     }
-
-    const data = (await response.json()) as any;
-    const sales = data.data || [];
 
     // Filtrar pelas vendas do email do cliente (case-insensitive)
     const customerSales = sales.filter((sale: any) =>
+        sale.product?.id === productId &&
         sale.customer &&
         sale.customer.email &&
         sale.customer.email.trim().toLowerCase() === rawEmail
