@@ -868,7 +868,7 @@ async function sendAppealsByEmail(to: string, name: string, appeals: { content: 
     const plates = appeals.map(a => a.plate).filter(Boolean).join(', ');
 
     await sendBrevoEmail({
-        sender: { name: 'AutoRecurso', email: 'recurso@autorecurso.online' },
+        sender: { name: 'AutoRecurso', email: process.env.EMAIL_SENDER || 'contato@autorecurso.online' },
         to: [{ email: to, name: name || undefined }],
         subject: plates ? `Seu Recurso de Trânsito - ${plates}` : 'Seu Recurso de Trânsito - AutoRecurso',
         htmlContent: `
@@ -913,7 +913,7 @@ app.post('/auto-api/email/checkout', rateLimit(5, 10 * 60000), async (req, res) 
             : `https://pay.kiwify.com.br/YtpRqSE`;
         
         const emailPayload = {
-            sender: { name: 'AutoRecurso', email: 'recurso@autorecurso.online' },
+            sender: { name: 'AutoRecurso', email: process.env.EMAIL_SENDER || 'contato@autorecurso.online' },
             to: [{ email, name: escapeHtml(name || '') }],
             subject: 'Seu Recurso de Trânsito aguarda finalização! 🚗',
             htmlContent: `
