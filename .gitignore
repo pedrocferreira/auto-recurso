@@ -7,19 +7,63 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Production / Build outputs
+dist/
+dist-ssr/
+server/dist/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
 *.local
 
-# Editor directories and files
+# Database & Persistent Data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data.json
+server/data.json
+server/data/
+
+# Python Virtual Environments & Caches (Security Audit scripts)
+.venv/
+*/.venv/
+venv/
+*/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary & Backup files
+*.backup
+*.bak
+*.tmp
+*.swp
+*.swo
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.idea/
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
-.env
+
+# AI Agent metadata
+.agents/
+

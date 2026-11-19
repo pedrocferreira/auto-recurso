@@ -1,0 +1,26 @@
+{
+  "events": [
+    {
+      "id": "1769484071819-zdam3v1c5",
+      "timestamp": 1769484071819,
+      "type": "payment_started",
+      "data": {
+        "customerName": "PEDRO DA COSTA FERREIRA",
+        "customerEmail": "pedroocferreira@gmail.com",
+        "customerCpf": "01414397003",
+        "customerPhone": "51981281898",
+        "ticketPlate": "IRT6D28-RS",
+        "ticketArticle": "Lei 9503/97(CTB) - 218 I",
+        "amount": 24.9
+      }
+    }
+  ],
+  "customers": [],
+  "resources": [],
+  "abandonedCarts": [],
+  "settings": {
+    "isFreeGenerationEnabled": true,
+    "freeGenerationLimit": 10,
+    "freeGenerationsUsed": 0
+  }
+}

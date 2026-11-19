@@ -1,0 +1,53 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af"/>
+      <stop offset="100%" style="stop-color:#0f172a"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="100" cy="100" r="200" fill="#3b82f6" opacity="0.1"/>
+  <circle cx="1100" cy="530" r="300" fill="#3b82f6" opacity="0.1"/>
+  
+  <!-- Main Title -->
+  <text x="600" y="200" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="white" text-anchor="middle">
+    ANULE SUA MULTA
+  </text>
+  <text x="600" y="280" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#60a5fa" text-anchor="middle">
+    EM 3 PASSOS
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="600" y="360" font-family="Arial, sans-serif" font-size="28" fill="#94a3b8" text-anchor="middle">
+    IA que analisa o Código de Trânsito Brasileiro
+  </text>
+  <text x="600" y="400" font-family="Arial, sans-serif" font-size="28" fill="#94a3b8" text-anchor="middle">
+    e gera recursos profissionais em minutos
+  </text>
+  
+  <!-- Stats badges -->
+  <rect x="300" y="460" width="200" height="80" rx="15" fill="#22c55e" opacity="0.2"/>
+  <text x="400" y="505" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#22c55e" text-anchor="middle">
+    90%
+  </text>
+  <text x="400" y="530" font-family="Arial, sans-serif" font-size="14" fill="#22c55e" text-anchor="middle">
+    PRECISÃO TÉCNICA
+  </text>
+  
+  <rect x="700" y="460" width="200" height="80" rx="15" fill="#3b82f6" opacity="0.2"/>
+  <text x="800" y="505" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#60a5fa" text-anchor="middle">
+    +1.200
+  </text>
+  <text x="800" y="530" font-family="Arial, sans-serif" font-size="14" fill="#60a5fa" text-anchor="middle">
+    RECURSOS GERADOS
+  </text>
+  
+  <!-- Logo -->
+  <text x="600" y="600" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#475569" text-anchor="middle">
+    AUTO RECURSO • autorecurso.online
+  </text>
+</svg>
