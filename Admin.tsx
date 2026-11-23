@@ -3,6 +3,7 @@ import { getAdminData, updateAdminSettings, clearAllData, logEvent } from './ser
 import { sendResourceEmail, sendCartRecoveryEmail } from './services/emailService';
 import { AnalyticsEvent, CustomerRecord, ResourceRecord, AdminSettings } from './types';
 import ReactMarkdown from 'react-markdown';
+import FunnelTab from './FunnelTab';
 import {
     TrendingUp,
     DollarSign,
@@ -24,7 +25,7 @@ import {
     Zap
 } from 'lucide-react';
 
-type TabType = 'overview' | 'customers' | 'resources' | 'logs' | 'abandoned' | 'settings';
+type TabType = 'overview' | 'funnel' | 'customers' | 'resources' | 'logs' | 'abandoned' | 'settings';
 
 const Admin: React.FC = () => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -267,6 +268,7 @@ const Admin: React.FC = () => {
 
     const tabs = [
         { id: 'overview' as TabType, label: 'Visão Geral', icon: Activity },
+        { id: 'funnel' as TabType, label: 'Funil', icon: TrendingUp },
         { id: 'customers' as TabType, label: 'Clientes', icon: Users, count: customers.length },
         { id: 'resources' as TabType, label: 'Recursos', icon: FileText, count: resources.length },
         { id: 'logs' as TabType, label: 'Logs', icon: AlertCircle },
@@ -333,6 +335,8 @@ const Admin: React.FC = () => {
             )}
 
             <main className="max-w-7xl mx-auto p-4 space-y-6">
+                {activeTab === 'funnel' && <FunnelTab />}
+
                 {/* Overview Tab */}
                 {activeTab === 'overview' && (
                     <>

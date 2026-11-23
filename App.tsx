@@ -2,6 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal, analyzeManualTicket } from './services/geminiService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
+import SupportButton from './SupportButton';
+import { trackFunnel, trackVisit } from './services/funnelService';
+import { SUPPORT_PHONE_DISPLAY, SUPPORT_WA_URL } from './support';
 import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
@@ -243,6 +246,16 @@ const App: React.FC = () => {
     }
   }, [ticketInfo]);
 
+  // Funil de visitantes (painel admin): origem do acesso e etapa em que cada visitante está
+  useEffect(() => { trackVisit(); }, []);
+  useEffect(() => {
+    if (step === AppStep.ANALYZING) trackFunnel('upload');
+    else if (step === AppStep.STRATEGY_SELECTION) trackFunnel('analysis');
+    else if (step === AppStep.USER_INPUT) trackFunnel('strategy');
+    else if (step === AppStep.USER_DATA) trackFunnel('data');
+    else if (step === AppStep.PAYMENT) trackFunnel('checkout', { name: personalData.fullName, email: personalData.email });
+  }, [step]);
+
   const handleVerifyPayment = async () => {
     setIsProcessing(true);
     setError(null);
@@ -265,6 +278,7 @@ const App: React.FC = () => {
       const result = await checkKiwifyPaymentStatus(paymentEmail);
       if (result.status === 'PAID') {
         logEvent('payment_completed', { email: paymentEmail, amount: 39.90 });
+        trackFunnel('paid', { email: paymentEmail });
         // A conversão é registrada só depois que o recurso é gerado (handleGenerateDocument)
         handleGenerateDocument();
       } else {
@@ -531,6 +545,7 @@ const App: React.FC = () => {
 
       setFinalDocument(doc);
       setStep(AppStep.FINAL_DOCUMENT);
+      trackFunnel('generated', { free: !!options.useFreeGeneration, email: currentPersonalData.email, name: currentPersonalData.fullName });
       // Uma conversão por venda paga: não conta geração grátis nem modo dev
       if (!options.useFreeGeneration && !isDevMode) {
         trackPurchaseConversion({
@@ -1171,6 +1186,7 @@ const App: React.FC = () => {
                             localStorage.setItem('appStep', AppStep.PAYMENT);
                             localStorage.setItem('personalData', JSON.stringify(personalData));
 
+                            trackFunnel('pay_click', { name: personalData.fullName, email: personalData.email }, true);
                             logEvent('payment_started', {
                               customerName: personalData.fullName,
                               customerEmail: personalData.email,
@@ -1376,7 +1392,9 @@ const App: React.FC = () => {
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
         <p className="mb-4">© 2026 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
+        <p className="mt-3">Suporte: <a href={SUPPORT_WA_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
       </footer>
+      <SupportButton />
 
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -1644,6 +1662,7 @@ const App: React.FC = () => {
       {/* Footer */}
       <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
         <p>© 2026 AutoRecurso. Todos os direitos reservados.</p>
+        <p className="mt-2">Suporte: <a href={SUPPORT_WA_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
         <button
           onClick={() => setShowPrivacy(true)}
           className="mt-2 underline hover:text-blue-600 transition-colors"
@@ -1658,6 +1677,7 @@ const App: React.FC = () => {
           Termos de Uso e Reembolso
         </button>
       </footer>
+      <SupportButton />
     </div>
   );
 };

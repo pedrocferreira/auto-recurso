@@ -70,6 +70,7 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_resources_plate ON resources(ticket_plate);
     CREATE INDEX IF NOT EXISTS idx_resources_cpf ON resources(customer_cpf);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, timestamp);
   `);
 
   // Inicializa configurações padrão se vazias
@@ -163,6 +164,11 @@ export const getEvents = () => {
     timestamp: r.timestamp,
     data: r.data ? JSON.parse(r.data) : {}
   }));
+};
+
+export const getFunnelEvents = (sinceTs: number) => {
+  const rows = db.prepare("SELECT timestamp, data FROM events WHERE type = 'funnel' AND timestamp >= ? ORDER BY timestamp ASC").all(sinceTs) as any[];
+  return rows.map(r => { let d: any = {}; try { d = JSON.parse(r.data); } catch { /* ignora */ } return { timestamp: r.timestamp, data: d }; });
 };
 
 export const addEvent = (eventData: any) => {

@@ -9,7 +9,8 @@ import { activeAIProvider, generateAI, generateAIJson } from './ai.js';
 import jwt from 'jsonwebtoken';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle, Tab, TabStopType, TabStopPosition, Header, Footer, PageNumber, NumberFormat } from 'docx';
 import { Request, Response, NextFunction } from 'express';
-import { addEvent, addResource, purgeExpiredData, claimFreeGeneration, claimSale, clearAllData, getAdminSnapshot, getSettings, isSaleConsumed, releaseFreeGeneration, releaseSale, searchCustomerResources, updateSettings } from './db.js';
+import { buildFunnel, FUNNEL_STEP_IDS } from './funnel.js';
+import { addEvent, addResource, getFunnelEvents, purgeExpiredData, claimFreeGeneration, claimSale, clearAllData, getAdminSnapshot, getSettings, isSaleConsumed, releaseFreeGeneration, releaseSale, searchCustomerResources, updateSettings } from './db.js';
 
 dotenv.config();
 const port = process.env.PORT || 3001;
@@ -677,6 +678,17 @@ app.get('/auto-api/admin/data', authMiddleware, (req, res) => {
     }
 });
 
+app.get('/auto-api/admin/funnel', authMiddleware, (req, res) => {
+    try {
+        const days = Math.min(Math.max(parseInt(String(req.query.days ?? '7'), 10) || 7, 1), 365);
+        const since = days === 1 ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : Date.now() - days * 24 * 60 * 60 * 1000;
+        res.json({ days, ...buildFunnel(getFunnelEvents(since), since) });
+    } catch (error: any) {
+        console.error('Error building funnel:', error);
+        res.status(500).json({ error: 'Erro ao consultar o funil' });
+    }
+});
+
 app.post('/auto-api/admin/settings', authMiddleware, (req, res) => {
     try {
         const settings = updateSettings(req.body);
@@ -705,7 +717,9 @@ const ALLOWED_EVENT_TYPES = new Set([
     'generation_error',
     'form_abandoned',
     'email_failed',
-    'email_sent'
+    'email_sent',
+    'funnel',
+    'support_click'
 ]);
 
 app.post('/auto-api/analytics/event', rateLimit(100, 60000), (req, res) => {
@@ -719,6 +733,12 @@ app.post('/auto-api/analytics/event', rateLimit(100, 60000), (req, res) => {
         const dataStr = JSON.stringify(eventData);
         if (dataStr.length > 50000) {
             return res.status(413).json({ success: false, error: 'Payload de dados excede o limite máximo permitido.' });
+        }
+        if (rawType === 'funnel') {
+            const vid = (eventData as any).visitorId;
+            if (typeof vid !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(vid) || !FUNNEL_STEP_IDS.has((eventData as any).step)) {
+                return res.status(400).json({ success: false, error: 'Evento de funil inválido.' });
+            }
         }
         addEvent({ type: rawType, data: typeof eventData === 'object' ? eventData : {} });
         res.json({ success: true });
