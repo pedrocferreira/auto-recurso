@@ -2,10 +2,10 @@ import React, { useRef, useState } from 'react';
 import { Play } from 'lucide-react';
 import { logEvent } from './services/analyticsService';
 
-// Arquivos em public/video/: como-funciona.mp4 e poster.jpg (veja LEIA-ME.txt).
+// Arquivos em public/video/: como-funciona-v2.mp4 e poster-v2.jpg (veja LEIA-ME.txt).
 // Se o arquivo não existir, a seção some sozinha e a LP continua normal.
-const VIDEO_MP4 = '/video/como-funciona.mp4';
-const VIDEO_POSTER = '/video/poster.jpg';
+const VIDEO_MP4 = '/video/como-funciona-v2.mp4';
+const VIDEO_POSTER = '/video/poster-v2.jpg';
 
 const HeroVideo: React.FC = () => {
   const ref = useRef<HTMLVideoElement>(null);
