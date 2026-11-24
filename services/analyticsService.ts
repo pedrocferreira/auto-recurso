@@ -8,7 +8,7 @@ export interface AnalyticsEvent {
 }
 
 export const GOOGLE_ADS_CONVERSION_ID = '16970325896';
-export const GOOGLE_ADS_CONVERSION_LABEL = 'IUnHCNH0xrscEIi_ipw_';
+export const GOOGLE_ADS_CONVERSION_LABEL = 'SIiCCLep1LIaEIi_ipw_';
 
 export interface PurchaseConversionData {
     amount?: number;
