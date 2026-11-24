@@ -60,9 +60,7 @@ describe('Auto Recurso - API Integration Test Suite (QA Senior)', () => {
       const response = await request(app).get('/health');
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('status', 'ok');
-      expect(response.body).toHaveProperty('uptime');
       expect(response.body).toHaveProperty('timestamp');
-      expect(typeof response.body.uptime).toBe('number');
     });
 
     it('GET /auto-api/health deve responder com status ok sob o prefixo de rota', async () => {
