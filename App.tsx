@@ -639,7 +639,7 @@ const App: React.FC = () => {
             <span>Já pagou? <strong className="text-blue-600 font-black">Recuperar Recurso</strong></span>
           </button>
           <div className="hidden lg:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest pl-2">
-            <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> 100% Seguro</span>
+            <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> Pagamento seguro</span>
             <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> IA Especialista</span>
           </div>
         </div>
@@ -664,10 +664,10 @@ const App: React.FC = () => {
                   ✨ Inteligência Artificial Jurídica
                 </span>
                 <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 leading-tight">
-                  Anule sua multa em <span className="text-blue-600">3 passos.</span>
+                  Recorra da sua multa em <span className="text-blue-600">3 passos.</span>
                 </h2>
                 <p className="text-slate-500 text-lg max-w-xl mx-auto">
-                  Nossa IA analisa o CTB em tempo real e gera defesas com mais de 90% de precisão técnica.
+                  Nossa IA analisa o CTB e monta o recurso da sua multa em minutos. O resultado não é garantido.
                 </p>
 
                 <HeroVideo />
@@ -714,22 +714,14 @@ const App: React.FC = () => {
                 ))}
               </div>
 
-              {/* Banner de Prova Social */}
-              <div className="mb-6 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-center animate-fadeIn">
-                <p className="text-xs md:text-sm font-black text-emerald-800 flex items-center justify-center gap-2">
-                  <span>🎉</span>
-                  <span><strong>+ de 100 multas</strong> já foram anuladas com a nossa Inteligência Artificial!</span>
-                </p>
-              </div>
-
               {/* Value Props */}
               <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 md:p-8 mb-10">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                   {[
                     { val: '15 seg', label: 'Análise da Multa' },
-                    { val: '+100', label: 'Multas Anuladas' },
-                    { val: '90%', label: 'Precisão Jurídica' },
-                    { val: '24/7', label: 'Disponibilidade' }
+                    { val: 'CTB', label: 'Base Legal' },
+                    { val: '24/7', label: 'Disponibilidade' },
+                    { val: 'R$ 39,90', label: 'Pagamento Único' }
                   ].map((m, i) => (
                     <div key={i}>
                       <p className="text-2xl md:text-3xl font-black text-white">{m.val}</p>

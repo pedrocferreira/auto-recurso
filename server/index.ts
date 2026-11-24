@@ -91,6 +91,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable('x-powered-by');
 
 // Proxies confiáveis: por padrão só endereços de rede privada (nginx do container e o proxy do host).
 // Se houver Cloudflare ou outro proxy público na frente, ajuste TRUST_PROXY.
@@ -220,12 +221,7 @@ function consumeAiBudget(): boolean {
 // --- Routes ---
 
 app.get(['/health', '/auto-api/health'], (req, res) => {
-    res.json({
-        status: 'ok',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV || 'development'
-    });
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.post('/auto-api/generate/analyze', rateLimit(10, 10 * 60000), async (req, res) => {
@@ -1215,6 +1211,15 @@ app.post('/auto-api/generate/docx', async (req, res) => {
 app.use((req, res) => {
     console.log(`[404] Route not found: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ error: "Route not found", path: req.originalUrl });
+});
+
+// Erros (ex.: JSON inválido): resposta curta, sem stack trace nem caminhos internos.
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = Number(err?.status || err?.statusCode) || 500;
+    if (status >= 500) console.error('[Erro]', req.method, req.originalUrl, err);
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+        error: status === 400 ? 'Requisição inválida.' : status === 413 ? 'Requisição grande demais.' : 'Erro interno.'
+    });
 });
 
 if (process.env.NODE_ENV !== 'test') {

@@ -10,6 +10,7 @@ services:
       - ./server/data:/app/data
     environment:
       - DB_PATH=/app/data/autorecurso.db
+      - NODE_ENV=production
     env_file:
       - ./server/.env
     networks:
