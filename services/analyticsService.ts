@@ -155,3 +155,9 @@ export const searchResources = async (query: string): Promise<{ success: boolean
 };
 
 
+
+export const getFunnel = async (days: number) => {
+    const response = await fetch(`/auto-api/admin/funnel?days=${days}`, { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error('Falha ao carregar o funil');
+    return await response.json();
+};

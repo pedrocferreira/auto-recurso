@@ -24,7 +24,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                         </div>
                         <div>
                             <h1 className="text-3xl font-black text-slate-900">Política de Privacidade</h1>
-                            <p className="text-slate-500 text-sm">Última atualização: 18 de novembro de 2026</p>
+                            <p className="text-slate-500 text-sm">Última atualização: 23 de novembro de 2026</p>
                         </div>
                     </div>
 
@@ -44,7 +44,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                                 <li><strong>Dados do Veículo:</strong> Placa, informações do auto de infração.</li>
                                 <li><strong>Imagens:</strong> Fotos do auto de infração ou CNH enviadas para análise.</li>
                                 <li><strong>Dados de Pagamento:</strong> Processados exclusivamente pela Kiwify. Não armazenamos dados de cartão.</li>
-                                <li><strong>Dados de Uso:</strong> Logs de acesso, eventos de navegação e interações com a plataforma, inclusive por ferramentas de mensuração de campanhas do Google (Google Ads/Tag).</li>
+                                <li><strong>Dados de Uso:</strong> Logs de acesso, eventos de navegação e interações com a plataforma, inclusive por ferramentas de mensuração de campanhas do Google (Google Ads/Tag). Também usamos um identificador anônimo, guardado no seu navegador, para saber em que etapa do uso do site as pessoas desistem ou avançam, e a origem do acesso (por exemplo, anúncio ou link). Esse identificador só é ligado ao seu nome e e-mail se você os informar no fluxo de pagamento, e os dados pessoais dos eventos são anonimizados após o prazo de retenção.</li>
                             </ul>
                         </Section>
 
@@ -130,7 +130,8 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                             <h3 className="font-black text-slate-900 mb-2">Contato</h3>
                             <p className="text-slate-600 text-sm">
                                 Em caso de dúvidas sobre esta política, entre em contato conosco:<br />
-                                <strong>E-mail:</strong> contato@autorecurso.online
+                                <strong>E-mail:</strong> contato@autorecurso.online<br />
+                                <strong>WhatsApp:</strong> (51) 98128-1898
                             </p>
                         </div>
                     </div>

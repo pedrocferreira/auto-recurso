@@ -85,7 +85,7 @@ const TermsOfUse: React.FC<TermsOfUseProps> = ({ onBack }) => {
                             <ul className="list-disc pl-5 space-y-2 text-slate-600">
                                 <li>Conforme o art. 49 do Código de Defesa do Consumidor, você pode pedir o reembolso integral em até <strong>7 (sete) dias corridos</strong> contados da data da compra.</li>
                                 <li>Também reembolsamos o valor pago se, por falha técnica da Plataforma, não conseguirmos entregar o documento.</li>
-                                <li>Para pedir o reembolso, envie um e-mail para <strong>contato@autorecurso.online</strong> informando o e-mail usado na compra. O estorno é feito pelo mesmo meio de pagamento, em até 10 dias úteis após a solicitação, conforme os prazos da Kiwify e da sua instituição financeira.</li>
+                                <li>Para pedir o reembolso, envie um e-mail para <strong>contato@autorecurso.online</strong> ou uma mensagem para o WhatsApp <strong>(51) 98128-1898</strong>, informando o e-mail usado na compra. O estorno é feito pelo mesmo meio de pagamento, em até 10 dias úteis após a solicitação, conforme os prazos da Kiwify e da sua instituição financeira.</li>
                                 <li>O reembolso não é devido apenas porque o órgão de trânsito negou o recurso, pois o serviço contratado é a elaboração do documento, não o resultado do julgamento.</li>
                             </ul>
                         </Section>
@@ -117,7 +117,8 @@ const TermsOfUse: React.FC<TermsOfUseProps> = ({ onBack }) => {
                             <h3 className="font-black text-slate-900 mb-2">Contato</h3>
                             <p className="text-slate-600 text-sm">
                                 Dúvidas, suporte e pedidos de reembolso:<br />
-                                <strong>E-mail:</strong> contato@autorecurso.online
+                                <strong>E-mail:</strong> contato@autorecurso.online<br />
+                                <strong>WhatsApp:</strong> (51) 98128-1898
                             </p>
                         </div>
                     </div>
