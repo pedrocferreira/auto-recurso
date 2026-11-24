@@ -1,5 +1,5 @@
 Coloque aqui o video explicativo:
-  como-funciona-v2.mp4   (H.264/AAC, 1280x720, ideal < 15MB)
+  como-funciona-v3.mp4   (H.264/AAC, 1280x720, ideal < 15MB)
   como-funciona.webm  (opcional)
   poster-v2.jpg          (capa, 1280x720)
 Enquanto o arquivo nao existir, a LP nao mostra o bloco de video.
