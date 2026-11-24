@@ -1,6 +1,6 @@
 import React from 'react';
 import { SUPPORT_WA_URL } from './support';
-import { logEvent } from './services/analyticsService';
+import { trackWhatsAppClick } from './services/analyticsService';
 
 // Botão flutuante de suporte via WhatsApp
 const SupportButton: React.FC = () => (
@@ -9,7 +9,7 @@ const SupportButton: React.FC = () => (
     target="_blank"
     rel="noopener noreferrer"
     aria-label="Falar com o suporte no WhatsApp"
-    onClick={() => { logEvent('support_click', {}); }}
+    onClick={trackWhatsAppClick}
     className="no-print fixed bottom-5 right-5 z-40 flex items-center gap-2 pl-4 pr-5 py-3 rounded-full bg-green-500 hover:bg-green-600 text-white font-black text-sm shadow-xl transition-colors"
   >
     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
