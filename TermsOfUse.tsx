@@ -1,4 +1,5 @@
 import React from 'react';
+import { OPERATOR } from './support';
 import { ArrowLeft, FileText, Scale, CreditCard, RotateCcw, AlertTriangle, UserCheck, Ban, Gavel } from 'lucide-react';
 
 interface TermsOfUseProps {
@@ -42,6 +43,10 @@ const TermsOfUse: React.FC<TermsOfUseProps> = ({ onBack }) => {
                             <p className="text-slate-600">
                                 <strong>A Plataforma não é um escritório de advocacia, não presta assessoria jurídica e não representa o
                                 usuário perante órgãos de trânsito.</strong> O documento gerado é um modelo de texto produzido por IA.
+                            </p>
+                            <p className="text-slate-600 mt-3">
+                                <strong>Quem somos:</strong> {OPERATOR.legalName ? `${OPERATOR.legalName}${OPERATOR.cnpj ? `, CNPJ ${OPERATOR.cnpj}` : ''}${OPERATOR.address ? `, ${OPERATOR.address}` : ''}` : OPERATOR.brand}. Contato: {OPERATOR.email}.
+                                Não temos vínculo com DETRAN, Senatran, Contran, Polícia Rodoviária ou qualquer órgão do governo.
                             </p>
                         </Section>
 

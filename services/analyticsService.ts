@@ -58,7 +58,7 @@ export const trackPurchaseConversion = (data: PurchaseConversionData = {}) => {
                     items: [
                         {
                             item_name: 'Recurso de Multa de Trânsito',
-                            item_category: 'Serviço Jurídico IA',
+                            item_category: 'Ferramenta de recurso com IA',
                             price: value,
                             quantity: 1
                         }

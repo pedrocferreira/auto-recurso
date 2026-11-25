@@ -427,7 +427,7 @@ app.post('/auto-api/generate/appeal', rateLimit(10, 60000), async (req, res) => 
         const strategy = (ticketInfo?.strategies || []).find((s: any) => s.id === selectedStrategyId);
 
         const prompt = `
-Aja como um renomado Advogado Especialista em Direito de Trânsito Brasileiro. Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO profissional.
+Você é um assistente de redação que ajuda um condutor a escrever o próprio recurso. Gere um RECURSO ADMINISTRATIVO DE INFRAÇÃO DE TRÂNSITO em nome do recorrente. NÃO se apresente como advogado, NÃO inclua número de OAB nem assinatura de advogado: o documento é assinado apenas pelo próprio recorrente.
 
 REGRA ABSOLUTAMENTE OBRIGATÓRIA: NÃO use NENHUM placeholder, campo em branco, ou texto entre colchetes como [INSERIR...], [NÚMERO], [DATA], etc. TODOS os dados já foram fornecidos abaixo. Use-os DIRETAMENTE no texto. Se algum dado não estiver disponível, simplesmente omita aquela parte do texto. NUNCA peça para o usuário preencher nada.
 
