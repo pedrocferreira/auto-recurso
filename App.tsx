@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { analyzeTicketImage, analyzeCNHImage, generateFinalAppeal, analyzeManualTicket } from './services/geminiService';
 import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/paymentService';
+import LegalNotice from './LegalNotice';
 import SupportButton from './SupportButton';
 import { trackFunnel, trackVisit } from './services/funnelService';
 import { SUPPORT_PHONE_DISPLAY, SUPPORT_WA_URL } from './support';
@@ -640,7 +641,7 @@ const App: React.FC = () => {
           </button>
           <div className="hidden lg:flex items-center gap-4 text-xs font-bold text-slate-400 uppercase tracking-widest pl-2">
             <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4 text-green-500" /> Pagamento seguro</span>
-            <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> IA Especialista</span>
+            <span className="flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500" /> Texto gerado por IA</span>
           </div>
         </div>
       </header>
@@ -661,7 +662,7 @@ const App: React.FC = () => {
               {/* Hero Section */}
               <div className="text-center mb-10">
                 <span className="inline-block px-4 py-1.5 bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6 border border-blue-200/50">
-                  ✨ Inteligência Artificial Jurídica
+                  ✨ Ferramenta de IA para redigir recursos
                 </span>
                 <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 leading-tight">
                   Recorra da sua multa em <span className="text-blue-600">3 passos.</span>
@@ -699,7 +700,7 @@ const App: React.FC = () => {
                 {[
                   { num: '1', icon: <Camera className="w-8 h-8" />, title: 'Envie a Multa', desc: 'Fotografe ou envie o PDF da notificação de autuação.' },
                   { num: '2', icon: <Scale className="w-8 h-8" />, title: 'Escolha a Tese', desc: 'A IA identifica falhas e sugere teses de defesa. Você escolhe a que mais faz sentido.' },
-                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado em documento oficial formatado e pronto para imprimir ou baixar em Word/PDF.' }
+                  { num: '3', icon: <FileText className="w-8 h-8" />, title: 'Receba o Recurso', desc: 'Seu recurso é gerado como um modelo de texto, formatado para você revisar, imprimir ou baixar em Word/PDF.' }
                 ].map((s, i) => (
                   <div key={i} className="relative bg-gradient-to-br from-slate-50 to-white p-6 rounded-2xl border border-slate-100 hover:shadow-lg transition-shadow group">
                     <div className="absolute -top-3 -left-3 w-8 h-8 bg-blue-600 text-white rounded-xl flex items-center justify-center font-black text-sm shadow-lg">
@@ -788,7 +789,7 @@ const App: React.FC = () => {
           {(step === AppStep.ANALYZING || step === AppStep.GENERATING) && (
             <div className="p-20 flex flex-col items-center justify-center text-center">
               <Loader2 className="w-16 h-16 text-blue-600 animate-spin mb-6" />
-              <h3 className="text-2xl font-black text-slate-900">{step === AppStep.ANALYZING ? "Analisando Auto de Infração..." : "Redigindo Defesa Especializada..."}</h3>
+              <h3 className="text-2xl font-black text-slate-900">{step === AppStep.ANALYZING ? "Analisando Auto de Infração..." : "Redigindo seu recurso..."}</h3>
               <p className="text-slate-500 mt-2">Nossa IA está cruzando dados com o CTB atualizado.</p>
             </div>
           )}
@@ -940,7 +941,7 @@ const App: React.FC = () => {
                 onClick={() => setStep(AppStep.USER_DATA)}
                 className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-blue-700 transition-all"
               >
-                CONFIGURAR CABEÇALHO JURÍDICO
+                PREENCHER SEUS DADOS
               </button>
             </div>
           )}
@@ -1086,7 +1087,7 @@ const App: React.FC = () => {
                   Última Etapa
                 </span>
                 <h2 className="text-3xl font-black text-slate-900 mb-2">Revisão do seu Recurso</h2>
-                <p className="text-slate-500 font-medium">Confira os detalhes antes de gerar o documento oficial.</p>
+                <p className="text-slate-500 font-medium">Confira os detalhes antes de gerar o documento.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
@@ -1336,7 +1337,7 @@ const App: React.FC = () => {
               </div>
 
               <div className="document-sheet">
-                <div className="document-seal no-print">RECURSO OFICIAL</div>
+                <div className="document-seal no-print">MODELO GERADO POR IA</div>
                 <div className="document-content">
                   {finalDocument}
                 </div>
@@ -1383,7 +1384,8 @@ const App: React.FC = () => {
 
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
         <p className="mb-4">© 2026 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
-        <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
+        <p>A ferramenta não garante o deferimento do recurso. O texto é um modelo gerado por IA com base no CTB: revise-o antes de protocolar.</p>
+        <div className="mt-3 flex justify-center"><LegalNotice /></div>
         <p className="mt-3">Suporte: <a href={SUPPORT_WA_URL} onClick={trackWhatsAppClick} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
       </footer>
       <SupportButton />
@@ -1654,6 +1656,7 @@ const App: React.FC = () => {
       {/* Footer */}
       <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
         <p>© 2026 AutoRecurso. Todos os direitos reservados.</p>
+        <div className="mt-3 flex justify-center"><LegalNotice /></div>
         <p className="mt-2">Suporte: <a href={SUPPORT_WA_URL} onClick={trackWhatsAppClick} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
         <button
           onClick={() => setShowPrivacy(true)}
