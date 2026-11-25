@@ -9,6 +9,8 @@ export interface AnalyticsEvent {
 
 export const GOOGLE_ADS_CONVERSION_ID = '16970325896';
 export const GOOGLE_ADS_CONVERSION_LABEL = 'SIiCCLep1LIaEIi_ipw_';
+// Conversão "Clique WhatsApp" (Google Ads, meta Contato)
+export const GOOGLE_ADS_WHATSAPP_LABEL = 'IUnHCNH0xrscEIi_ipw_';
 
 export interface PurchaseConversionData {
     amount?: number;
@@ -69,6 +71,25 @@ export const trackPurchaseConversion = (data: PurchaseConversionData = {}) => {
     } catch (err) {
         console.warn('Erro ao enviar evento purchase para dataLayer:', err);
     }
+};
+
+/**
+ * Clique em qualquer link de WhatsApp do site: dispara a conversão "Clique WhatsApp" no Google Ads
+ * e registra o evento interno de suporte.
+ */
+export const trackWhatsAppClick = () => {
+    try {
+        if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+            window.gtag('event', 'conversion', {
+                send_to: `AW-${GOOGLE_ADS_CONVERSION_ID}/${GOOGLE_ADS_WHATSAPP_LABEL}`,
+                value: 1.0,
+                currency: 'BRL'
+            });
+        }
+    } catch (err) {
+        console.warn('Erro ao disparar conversão do WhatsApp:', err);
+    }
+    logEvent('support_click', {});
 };
 
 export const logEvent = async (type: string, data: any = {}) => {

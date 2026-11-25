@@ -5,7 +5,7 @@ import { redirectToKiwifyCheckout, checkKiwifyPaymentStatus } from './services/p
 import SupportButton from './SupportButton';
 import { trackFunnel, trackVisit } from './services/funnelService';
 import { SUPPORT_PHONE_DISPLAY, SUPPORT_WA_URL } from './support';
-import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion } from './services/analyticsService';
+import { logEvent, getPublicSettings, searchResources, trackPurchaseConversion, trackWhatsAppClick } from './services/analyticsService';
 import { AppStep, TicketInfo, PersonalInfo } from './types';
 import PrivacyPolicy from './PrivacyPolicy';
 import TermsOfUse from './TermsOfUse';
@@ -1384,7 +1384,7 @@ const App: React.FC = () => {
       <footer className="mt-12 text-center text-slate-400 text-xs max-w-lg no-print">
         <p className="mb-4">© 2026 AUTO RECURSO - Inteligência Artificial para Condutores.</p>
         <p>A ferramenta não garante o deferimento do recurso, mas fornece a melhor fundamentação técnica baseada no CTB e resoluções vigentes.</p>
-        <p className="mt-3">Suporte: <a href={SUPPORT_WA_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
+        <p className="mt-3">Suporte: <a href={SUPPORT_WA_URL} onClick={trackWhatsAppClick} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
       </footer>
       <SupportButton />
 
@@ -1654,7 +1654,7 @@ const App: React.FC = () => {
       {/* Footer */}
       <footer className="w-full max-w-3xl mt-12 text-center text-xs text-slate-400 no-print">
         <p>© 2026 AutoRecurso. Todos os direitos reservados.</p>
-        <p className="mt-2">Suporte: <a href={SUPPORT_WA_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
+        <p className="mt-2">Suporte: <a href={SUPPORT_WA_URL} onClick={trackWhatsAppClick} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-600">WhatsApp {SUPPORT_PHONE_DISPLAY}</a></p>
         <button
           onClick={() => setShowPrivacy(true)}
           className="mt-2 underline hover:text-blue-600 transition-colors"
